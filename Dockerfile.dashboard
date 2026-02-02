@@ -1,0 +1,24 @@
+# Dockerfile para o Dashboard Streamlit
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instalar dependências
+RUN pip install --no-cache-dir \
+    streamlit>=1.29.0 \
+    plotly>=5.18.0 \
+    pandas>=2.0.0 \
+    requests>=2.31.0
+
+# Copiar código do dashboard
+COPY dashboard/ ./dashboard/
+COPY logs/ ./logs/
+
+# Criar diretório de logs
+RUN mkdir -p /app/logs
+
+# Expor porta do Streamlit
+EXPOSE 8501
+
+# Comando para iniciar o dashboard
+CMD ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
