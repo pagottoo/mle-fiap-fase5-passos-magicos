@@ -1,0 +1,242 @@
+{
+  "features": {
+    "inde": {
+      "name": "inde",
+      "dtype": "numeric",
+      "description": "\u00cdndice de Desenvolvimento Educacional",
+      "source": "INDE",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.228287",
+      "tags": [
+        "indice",
+        "desenvolvimento"
+      ]
+    },
+    "iaa": {
+      "name": "iaa",
+      "dtype": "numeric",
+      "description": "\u00cdndice de Autoavalia\u00e7\u00e3o",
+      "source": "IAA",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.228565",
+      "tags": [
+        "indice",
+        "autoavaliacao"
+      ]
+    },
+    "ieg": {
+      "name": "ieg",
+      "dtype": "numeric",
+      "description": "\u00cdndice de Engajamento",
+      "source": "IEG",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.228718",
+      "tags": [
+        "indice",
+        "engajamento"
+      ]
+    },
+    "ips": {
+      "name": "ips",
+      "dtype": "numeric",
+      "description": "\u00cdndice Psicossocial",
+      "source": "IPS",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.228869",
+      "tags": [
+        "indice",
+        "psicossocial"
+      ]
+    },
+    "ida": {
+      "name": "ida",
+      "dtype": "numeric",
+      "description": "\u00cdndice de Desempenho Acad\u00eamico",
+      "source": "IDA",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.229020",
+      "tags": [
+        "indice",
+        "academico"
+      ]
+    },
+    "ipp": {
+      "name": "ipp",
+      "dtype": "numeric",
+      "description": "\u00cdndice de Participa\u00e7\u00e3o",
+      "source": "IPP",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.229169",
+      "tags": [
+        "indice",
+        "participacao"
+      ]
+    },
+    "ipv": {
+      "name": "ipv",
+      "dtype": "numeric",
+      "description": "\u00cdndice de Propens\u00e3o \u00e0 Virada",
+      "source": "IPV",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.229315",
+      "tags": [
+        "indice",
+        "virada",
+        "target_related"
+      ]
+    },
+    "ian": {
+      "name": "ian",
+      "dtype": "numeric",
+      "description": "\u00cdndice de Adequa\u00e7\u00e3o ao N\u00edvel",
+      "source": "IAN",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.229459",
+      "tags": [
+        "indice",
+        "nivel"
+      ]
+    },
+    "idade_aluno": {
+      "name": "idade_aluno",
+      "dtype": "numeric",
+      "description": "Idade do aluno em anos",
+      "source": "IDADE_ALUNO",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.229605",
+      "tags": [
+        "demografico"
+      ]
+    },
+    "anos_pm": {
+      "name": "anos_pm",
+      "dtype": "numeric",
+      "description": "Anos de participa\u00e7\u00e3o na Passos M\u00e1gicos",
+      "source": "ANOS_PM",
+      "transformation": "standard_scaling",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.229749",
+      "tags": [
+        "historico",
+        "engajamento"
+      ]
+    },
+    "instituicao_ensino": {
+      "name": "instituicao_ensino",
+      "dtype": "categorical",
+      "description": "Tipo de institui\u00e7\u00e3o de ensino do aluno",
+      "source": "INSTITUICAO_ENSINO_ALUNO",
+      "transformation": "label_encoding",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.229893",
+      "tags": [
+        "demografico",
+        "escola"
+      ]
+    },
+    "fase": {
+      "name": "fase",
+      "dtype": "categorical",
+      "description": "Fase do programa Passos M\u00e1gicos",
+      "source": "FASE",
+      "transformation": "label_encoding",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.230038",
+      "tags": [
+        "programa",
+        "nivel"
+      ]
+    },
+    "pedra": {
+      "name": "pedra",
+      "dtype": "categorical",
+      "description": "Classifica\u00e7\u00e3o do aluno (Quartzo, Ametista, \u00c1gata, Top\u00e1zio)",
+      "source": "PEDRA",
+      "transformation": "label_encoding",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.230182",
+      "tags": [
+        "classificacao",
+        "performance"
+      ]
+    },
+    "bolsista": {
+      "name": "bolsista",
+      "dtype": "categorical",
+      "description": "Indica se o aluno \u00e9 bolsista",
+      "source": "BOLSISTA",
+      "transformation": "label_encoding",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.230329",
+      "tags": [
+        "demografico",
+        "bolsa"
+      ]
+    }
+  },
+  "groups": {
+    "indices_avaliacao": {
+      "name": "indices_avaliacao",
+      "description": "\u00cdndices de avalia\u00e7\u00e3o educacional",
+      "features": [
+        "inde",
+        "iaa",
+        "ieg",
+        "ips",
+        "ida",
+        "ipp",
+        "ipv",
+        "ian"
+      ],
+      "entity": "aluno",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.230476"
+    },
+    "demografico": {
+      "name": "demografico",
+      "description": "Caracter\u00edsticas demogr\u00e1ficas do aluno",
+      "features": [
+        "idade_aluno",
+        "anos_pm",
+        "instituicao_ensino",
+        "bolsista"
+      ],
+      "entity": "aluno",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.230624"
+    },
+    "ponto_virada_features": {
+      "name": "ponto_virada_features",
+      "description": "Features para predi\u00e7\u00e3o de Ponto de Virada",
+      "features": [
+        "inde",
+        "iaa",
+        "ieg",
+        "ips",
+        "ida",
+        "ipp",
+        "ipv",
+        "ian",
+        "idade_aluno",
+        "anos_pm",
+        "instituicao_ensino",
+        "fase",
+        "pedra",
+        "bolsista"
+      ],
+      "entity": "aluno",
+      "version": "1.0.0",
+      "created_at": "2026-02-17T18:21:37.230769"
+    }
+  },
+  "updated_at": "2026-02-18T12:00:28.150122"
+}
