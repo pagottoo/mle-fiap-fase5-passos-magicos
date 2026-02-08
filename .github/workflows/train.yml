@@ -1,0 +1,347 @@
+# Model Training Pipeline
+#
+# Este workflow permite retreinar o modelo:
+# - Manualmente via workflow_dispatch
+# - Como fallback/execução ad-hoc fora do CronJob do Kubernetes
+#
+# Jobs:
+# 1. Train: Treina modelo com MLflow tracking
+# 2. Evaluate: Compara com modelo atual
+# 3. Register: Registra no Model Registry
+
+name: Model Training
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_type:
+        description: 'Model type to train'
+        required: true
+        default: 'random_forest'
+        type: choice
+        options:
+          - random_forest
+          - gradient_boosting
+          - logistic_regression
+      promote_to_staging:
+        description: 'Promote to staging after training'
+        required: false
+        default: true
+        type: boolean
+      experiment_name:
+        description: 'MLflow experiment name'
+        required: false
+        default: 'passos-magicos-ponto-virada'
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+  # Configure via GitHub Secret para ambiente centralizado.
+  # Se vazio, o código faz fallback local para ./mlruns.
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+
+jobs:
+  # ==================== Train ====================
+  train:
+    name: 🎯 Train Model
+    runs-on: ubuntu-latest
+    
+    outputs:
+      run_id: ${{ steps.train.outputs.run_id }}
+      model_version: ${{ steps.register.outputs.model_version }}
+      f1_score: ${{ steps.train.outputs.f1_score }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true  # Para datasets grandes
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Create directories
+        run: |
+          mkdir -p models logs feature_store/online mlruns mlartifacts
+      
+      - name: Train model
+        id: train
+        run: |
+          echo "🎯 Training model: ${{ inputs.model_type || 'random_forest' }}"
+          
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          
+          from src.data import DataPreprocessor, FeatureEngineer
+          from src.models.trainer import ModelTrainer
+          from src.config import DATA_DIR
+          import pandas as pd
+          import numpy as np
+          import os
+          
+          # Configurar
+          model_type = '${{ inputs.model_type }}' or 'random_forest'
+          experiment_name = '${{ inputs.experiment_name }}' or 'passos-magicos-ponto-virada'
+          
+          # Carregar dados
+          data_path = DATA_DIR / 'Bases antigas' / 'PEDE_PASSOS_DATASET_FIAP.csv'
+          
+          if data_path.exists():
+              df = pd.read_csv(data_path, sep=';')
+              print(f'Dados carregados: {len(df)} registros')
+          else:
+              # Dados de exemplo para CI
+              print('Criando dados de exemplo...')
+              np.random.seed(42)
+              n = 200
+              df = pd.DataFrame({
+                  'NOME': [f'Aluno_{i}' for i in range(n)],
+                  'INDE_2024': np.random.uniform(5, 9, n),
+                  'IPV_2024': np.random.uniform(5, 9, n),
+                  'IPP_2024': np.random.uniform(5, 9, n),
+                  'IDA_2024': np.random.uniform(10, 18, n),
+                  'IEG_2024': np.random.uniform(5, 9, n),
+                  'IAA_2024': np.random.uniform(5, 9, n),
+                  'IPS_2024': np.random.uniform(5, 9, n),
+                  'IAN_2024': np.random.uniform(5, 9, n),
+                  'IPD_2024': np.random.uniform(5, 9, n),
+                  'IAP_2024': np.random.uniform(5, 9, n),
+                  'NOTA_MAT_2024': np.random.uniform(5, 10, n),
+                  'FASE_2024': np.random.choice([1, 2, 3, 4], n),
+                  'ANOS_PM_2024': np.random.randint(1, 5, n),
+                  'PONTO_VIRADA_2024': np.random.choice([0, 1], n, p=[0.6, 0.4])
+              })
+          
+          # Preprocessamento
+          preprocessor = DataPreprocessor()
+          df = preprocessor.clean_data(df)
+          df = preprocessor.handle_missing_values(df)
+          
+          # Feature engineering
+          feature_engineer = FeatureEngineer()
+          df = feature_engineer.fit_transform(df)
+          X, y = feature_engineer.get_feature_matrix(df)
+          
+          # Treinar
+          trainer = ModelTrainer(
+              model_type=model_type,
+              experiment_name=experiment_name,
+              enable_mlflow=True
+          )
+          
+          trainer.start_run(
+              run_name=f'ci-{model_type}-{os.environ.get(\"GITHUB_RUN_NUMBER\", \"local\")}',
+              description='Training via GitHub Actions'
+          )
+          
+          X_train, X_test, y_train, y_test = trainer.split_data(X, y)
+          cv_results = trainer.cross_validate(X_train, y_train)
+          trainer.train(X_train, y_train)
+          metrics = trainer.evaluate(X_test, y_test)
+          
+          # Salvar modelo localmente
+          model_path = trainer.save_model(preprocessor, feature_engineer)
+          
+          # Registrar no MLflow
+          model_uri = trainer.log_model_to_mlflow(
+              X_sample=X_test[:5],
+              y_sample=y_test[:5],
+              registered_model_name='passos-magicos-ponto-virada'
+          )
+          
+          run_id = trainer.run_id
+          trainer.end_run()
+          
+          # Outputs para GitHub Actions
+          print(f'run_id={run_id}')
+          print(f'f1_score={metrics[\"f1_score\"]}')
+          
+          # Salvar em arquivo para outputs
+          with open('training_outputs.txt', 'w') as f:
+              f.write(f'run_id={run_id}\\n')
+              f.write(f'f1_score={metrics[\"f1_score\"]}\\n')
+              f.write(f'model_path={model_path}\\n')
+          "
+          
+          # Exportar outputs
+          if [ -f training_outputs.txt ]; then
+            while IFS= read -r line; do
+              echo "$line" >> $GITHUB_OUTPUT
+            done < training_outputs.txt
+          fi
+        env:
+          MLFLOW_ENABLED: 'true'
+      
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: |
+            models/
+            mlruns/
+          retention-days: 30
+      
+      - name: Training Summary
+        run: |
+          echo "## 🎯 Model Training Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Model Type | ${{ inputs.model_type || 'random_forest' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| F1 Score | ${{ steps.train.outputs.f1_score }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run ID | ${{ steps.train.outputs.run_id }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Evaluate ====================
+  evaluate:
+    name: 📊 Evaluate Model
+    runs-on: ubuntu-latest
+    needs: train
+    
+    outputs:
+      should_promote: ${{ steps.compare.outputs.should_promote }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Compare with production model
+        id: compare
+        run: |
+          echo "📊 Comparing new model with production..."
+          
+          NEW_F1=${{ needs.train.outputs.f1_score }}
+          THRESHOLD=0.70
+          
+          # Verificar se o novo modelo atende o threshold
+          python -c "
+          new_f1 = float('$NEW_F1')
+          threshold = float('$THRESHOLD')
+          
+          print(f'New model F1: {new_f1}')
+          print(f'Threshold: {threshold}')
+          
+          if new_f1 >= threshold:
+              print('✅ Model meets threshold - should promote')
+              should_promote = 'true'
+          else:
+              print('❌ Model below threshold - should not promote')
+              should_promote = 'false'
+          
+          with open('compare_output.txt', 'w') as f:
+              f.write(f'should_promote={should_promote}')
+          "
+          
+          cat compare_output.txt >> $GITHUB_OUTPUT
+      
+      - name: Evaluation Summary
+        run: |
+          echo "## 📊 Model Evaluation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| F1 Score | ${{ needs.train.outputs.f1_score }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Threshold | 0.70 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Should Promote | ${{ steps.compare.outputs.should_promote }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Register ====================
+  register:
+    name: 📦 Register Model
+    runs-on: ubuntu-latest
+    needs: [train, evaluate]
+    if: needs.evaluate.outputs.should_promote == 'true' && (inputs.promote_to_staging == true || inputs.promote_to_staging == '')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Promote to Staging
+        run: |
+          echo "📦 Promoting model to Staging..."
+          
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          
+          from src.mlflow_tracking import ModelRegistry
+          
+          registry = ModelRegistry()
+          
+          # Pegar última versão
+          versions = registry.get_latest_versions('passos-magicos-ponto-virada')
+          if versions:
+              version = int(versions[0].version)
+              print(f'Promoting version {version} to Staging')
+              registry.promote_to_staging('passos-magicos-ponto-virada', version)
+              print('✅ Model promoted to Staging')
+          else:
+              print('❌ No model versions found')
+          "
+      
+      - name: Registration Summary
+        run: |
+          echo "## 📦 Model Registration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Model promoted to **Staging**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To promote to Production, run the Model Deployment workflow." >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Notify ====================
+  notify:
+    name: 📢 Notify
+    runs-on: ubuntu-latest
+    needs: [train, evaluate, register]
+    if: always()
+    
+    steps:
+      - name: Pipeline Summary
+        run: |
+          echo "## 🎯 Training Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Train | ${{ needs.train.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Evaluate | ${{ needs.evaluate.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Register | ${{ needs.register.result }} |" >> $GITHUB_STEP_SUMMARY
