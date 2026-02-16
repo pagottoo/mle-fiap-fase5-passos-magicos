@@ -1,0 +1,465 @@
+# Model Deployment Pipeline
+#
+# Este workflow promove modelos entre stages:
+# - Staging → Production
+# - Rollback de versão
+#
+# Promotion em MLflow + rollout via GitOps (Argo CD)
+
+name: Model Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'promote'
+        type: choice
+        options:
+          - promote
+          - rollback
+      model_name:
+        description: 'Model name in registry'
+        required: true
+        default: 'passos-magicos-ponto-virada'
+        type: string
+      version:
+        description: 'Specific version (leave empty for latest staging)'
+        required: false
+        type: string
+      target_stage:
+        description: 'Target stage'
+        required: true
+        default: 'Production'
+        type: choice
+        options:
+          - Staging
+          - Production
+      auto_merge_gitops_pr:
+        description: 'Enable auto-merge for GitOps PRs (requires repo auto-merge enabled)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.11'
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+
+jobs:
+  # ==================== Validate ====================
+  validate:
+    name: 🔍 Validate Model
+    runs-on: ubuntu-latest
+    
+    outputs:
+      current_production_version: ${{ steps.check.outputs.production_version }}
+      staging_version: ${{ steps.check.outputs.staging_version }}
+      target_version: ${{ steps.check.outputs.target_version }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          mkdir -p mlruns
+      
+      - name: Check model versions
+        id: check
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          
+          from src.mlflow_tracking import ModelRegistry
+          
+          model_name = '${{ inputs.model_name }}'
+          specified_version = '${{ inputs.version }}'
+          
+          registry = ModelRegistry()
+          
+          # Pegar versões atuais
+          prod_version = registry.get_production_version(model_name)
+          staging_version = registry.get_staging_version(model_name)
+          
+          prod_v = prod_version.version if prod_version else 'None'
+          staging_v = staging_version.version if staging_version else 'None'
+          
+          # Determinar versão alvo
+          if specified_version:
+              target_v = specified_version
+          elif staging_version:
+              target_v = staging_version.version
+          else:
+              target_v = 'None'
+          
+          print(f'Current Production: v{prod_v}')
+          print(f'Current Staging: v{staging_v}')
+          print(f'Target Version: v{target_v}')
+          
+          with open('versions.txt', 'w') as f:
+              f.write(f'production_version={prod_v}\\n')
+              f.write(f'staging_version={staging_v}\\n')
+              f.write(f'target_version={target_v}\\n')
+          " 2>/dev/null || echo "No existing versions found"
+          
+          if [ -f versions.txt ]; then
+            cat versions.txt >> $GITHUB_OUTPUT
+          else
+            echo "production_version=None" >> $GITHUB_OUTPUT
+            echo "staging_version=None" >> $GITHUB_OUTPUT
+            echo "target_version=None" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Validation Summary
+        run: |
+          echo "## 🔍 Model Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Model Name | ${{ inputs.model_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Current Production | ${{ steps.check.outputs.production_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Current Staging | ${{ steps.check.outputs.staging_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Version | ${{ steps.check.outputs.target_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Action | ${{ inputs.action }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Stage | ${{ inputs.target_stage }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Deploy to Production ====================
+  deploy-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: validate
+    if: inputs.target_stage == 'Staging' && inputs.action == 'promote'
+    environment:
+      name: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          mkdir -p mlruns
+
+      - name: Promote to Staging
+        run: |
+          echo "🚀 Promoting model to Staging..."
+
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+
+          from src.mlflow_tracking import ModelRegistry
+
+          model_name = '${{ inputs.model_name }}'
+          version = '${{ needs.validate.outputs.target_version }}'
+
+          if version == 'None':
+              print('❌ No version to promote')
+              sys.exit(1)
+
+          registry = ModelRegistry()
+
+          print(f'Promoting {model_name} v{version} to Staging')
+          registry.promote_to_staging(model_name, int(version))
+          print('✅ Model promoted to Staging')
+          "
+
+      - name: Staging Summary
+        run: |
+          echo "## 🚀 Staging Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Model **${{ inputs.model_name }}** v${{ needs.validate.outputs.target_version }} deployed to **Staging**" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Deploy to Production ====================
+  deploy-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: validate
+    if: inputs.target_stage == 'Production' && inputs.action == 'promote'
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      gitops_pr_url: ${{ steps.create_pr.outputs.pull-request-url }}
+      gitops_pr_operation: ${{ steps.create_pr.outputs.pull-request-operation }}
+    environment:
+      name: production
+      url: https://passos-magicos.example.com
+    
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          mkdir -p mlruns
+      
+      - name: Promote to Production
+        run: |
+          echo "🚀 Promoting model to Production..."
+          
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          
+          from src.mlflow_tracking import ModelRegistry
+          
+          model_name = '${{ inputs.model_name }}'
+          version = '${{ needs.validate.outputs.target_version }}'
+          
+          if version == 'None':
+              print('❌ No version to promote')
+              sys.exit(1)
+          
+          registry = ModelRegistry()
+          
+          print(f'Promoting {model_name} v{version} to Production')
+          registry.promote_to_production(model_name, int(version))
+          print('✅ Model promoted to Production')
+          "
+
+      - name: Update API reload annotation (GitOps)
+        env:
+          RELOAD_MARK: promote-production-v${{ needs.validate.outputs.target_version }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          sed -i "s|mlops.passos-magicos/reload-at: \".*\"|mlops.passos-magicos/reload-at: \"${RELOAD_MARK}\"|g" k8s/deployment.yaml
+          echo "Updated reload annotation:"
+          grep -n "mlops.passos-magicos/reload-at" k8s/deployment.yaml
+
+      - name: Create GitOps PR for rollout
+        id: create_pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gitops/model-promote-prod-v${{ needs.validate.outputs.target_version }}-${{ github.run_id }}
+          delete-branch: true
+          base: ${{ github.event.repository.default_branch }}
+          title: "chore(gitops): reload api after model promote v${{ needs.validate.outputs.target_version }}"
+          commit-message: "chore(gitops): trigger api rollout for model v${{ needs.validate.outputs.target_version }}"
+          body: |
+            Promotion de modelo no MLflow concluída e criação de rollout via GitOps.
+
+            - Action: promote
+            - Target stage: Production
+            - Model: `${{ inputs.model_name }}`
+            - Version: `${{ needs.validate.outputs.target_version }}`
+            - Trigger: atualização de `mlops.passos-magicos/reload-at` em `k8s/deployment.yaml`
+
+            Após merge, o Argo CD sincroniza e o Kubernetes executa rolling restart da API.
+          labels: |
+            gitops
+            mlops
+            model-deployment
+          add-paths: |
+            k8s/deployment.yaml
+
+      - name: Check model-deployment label (auto-merge gate)
+        id: label_check
+        if: ${{ inputs.auto_merge_gitops_pr && steps.create_pr.outputs.pull-request-number != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number("${{ steps.create_pr.outputs.pull-request-number }}");
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            const hasLabel = (pr.labels || []).some(label => label.name === "model-deployment");
+            core.setOutput("has_label", String(hasLabel));
+            if (!hasLabel) {
+              core.warning("PR sem label model-deployment. Auto-merge não será habilitado.");
+            }
+
+      - name: Enable auto-merge (optional)
+        if: ${{ inputs.auto_merge_gitops_pr && steps.create_pr.outputs.pull-request-number != '' && steps.label_check.outputs.has_label == 'true' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
+          merge-method: squash
+      
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Production Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Model **${{ inputs.model_name }}** v${{ needs.validate.outputs.target_version }} deployed to **Production**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Previous version: v${{ needs.validate.outputs.current_production_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "GitOps PR: ${{ steps.create_pr.outputs.pull-request-url || 'No PR created' }}" >> $GITHUB_STEP_SUMMARY
+          echo "Auto-merge requested: ${{ inputs.auto_merge_gitops_pr }}" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Rollback ====================
+  rollback:
+    name: ⏪ Rollback
+    runs-on: ubuntu-latest
+    needs: validate
+    if: inputs.action == 'rollback'
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      gitops_pr_url: ${{ steps.create_pr.outputs.pull-request-url }}
+      gitops_pr_operation: ${{ steps.create_pr.outputs.pull-request-operation }}
+    environment:
+      name: production
+    
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          mkdir -p mlruns
+      
+      - name: Perform Rollback
+        run: |
+          echo "⏪ Rolling back model..."
+          
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          
+          from src.mlflow_tracking import ModelRegistry
+          
+          model_name = '${{ inputs.model_name }}'
+          target_version = '${{ inputs.version }}'
+          
+          if not target_version:
+              print('❌ Version required for rollback')
+              sys.exit(1)
+          
+          registry = ModelRegistry()
+          
+          print(f'Rolling back to {model_name} v{target_version}')
+          registry.promote_to_production(model_name, int(target_version))
+          print('✅ Rollback complete')
+          "
+
+      - name: Update API reload annotation (GitOps)
+        env:
+          RELOAD_MARK: rollback-production-v${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          sed -i "s|mlops.passos-magicos/reload-at: \".*\"|mlops.passos-magicos/reload-at: \"${RELOAD_MARK}\"|g" k8s/deployment.yaml
+          echo "Updated reload annotation:"
+          grep -n "mlops.passos-magicos/reload-at" k8s/deployment.yaml
+
+      - name: Create GitOps PR for rollback rollout
+        id: create_pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gitops/model-rollback-prod-v${{ inputs.version }}-${{ github.run_id }}
+          delete-branch: true
+          base: ${{ github.event.repository.default_branch }}
+          title: "chore(gitops): reload api after model rollback v${{ inputs.version }}"
+          commit-message: "chore(gitops): trigger api rollout after rollback v${{ inputs.version }}"
+          body: |
+            Rollback de modelo no MLflow concluído e criação de rollout via GitOps.
+
+            - Action: rollback
+            - Target stage: Production
+            - Model: `${{ inputs.model_name }}`
+            - Version: `${{ inputs.version }}`
+            - Trigger: atualização de `mlops.passos-magicos/reload-at` em `k8s/deployment.yaml`
+
+            Após merge, o Argo CD sincroniza e o Kubernetes executa rolling restart da API.
+          labels: |
+            gitops
+            mlops
+            model-deployment
+          add-paths: |
+            k8s/deployment.yaml
+
+      - name: Check model-deployment label (auto-merge gate)
+        id: label_check
+        if: ${{ inputs.auto_merge_gitops_pr && steps.create_pr.outputs.pull-request-number != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number("${{ steps.create_pr.outputs.pull-request-number }}");
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            const hasLabel = (pr.labels || []).some(label => label.name === "model-deployment");
+            core.setOutput("has_label", String(hasLabel));
+            if (!hasLabel) {
+              core.warning("PR sem label model-deployment. Auto-merge não será habilitado.");
+            }
+
+      - name: Enable auto-merge (optional)
+        if: ${{ inputs.auto_merge_gitops_pr && steps.create_pr.outputs.pull-request-number != '' && steps.label_check.outputs.has_label == 'true' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
+          merge-method: squash
+      
+      - name: Rollback Summary
+        run: |
+          echo "## ⏪ Rollback Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Model rolled back to version **v${{ inputs.version }}**" >> $GITHUB_STEP_SUMMARY
+          echo "GitOps PR: ${{ steps.create_pr.outputs.pull-request-url || 'No PR created' }}" >> $GITHUB_STEP_SUMMARY
+          echo "Auto-merge requested: ${{ inputs.auto_merge_gitops_pr }}" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Notify ====================
+  notify:
+    name: 📢 Notify
+    runs-on: ubuntu-latest
+    needs: [validate, deploy-staging, deploy-production, rollback]
+    if: always()
+    
+    steps:
+      - name: Send notification
+        run: |
+          echo "## 📢 Deployment Notification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status | GitOps PR |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Validate | ${{ needs.validate.result }} | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Staging | ${{ needs.deploy-staging.result }} | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Production | ${{ needs.deploy-production.result }} | ${{ needs.deploy-production.outputs.gitops_pr_url || '-' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rollback | ${{ needs.rollback.result }} | ${{ needs.rollback.outputs.gitops_pr_url || '-' }} |" >> $GITHUB_STEP_SUMMARY
