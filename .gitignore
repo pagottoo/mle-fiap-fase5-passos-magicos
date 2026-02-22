@@ -125,13 +125,17 @@ Thumbs.db
 # Project specific
 logs/*.log
 logs/*.jsonl
-models/*.joblib
+models/*
 !models/.gitkeep
+mlruns/
+feature_store/offline/
+feature_store/online/
+feature_store/registry.json
+feature_store/*.db
 
 # Dados sensíveis
 dados/
 definitions/
 .VARS
-k8s
 argocd
 *.sh

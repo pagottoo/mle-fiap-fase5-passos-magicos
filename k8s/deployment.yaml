@@ -1,0 +1,169 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: passos-magicos-api
+  namespace: passos-magicos
+  labels:
+    app: passos-magicos
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: passos-magicos
+      component: api
+  template:
+    metadata:
+      labels:
+        app: passos-magicos
+        component: api
+      annotations:
+        # Alterado pelo workflow deploy-model.yml para forçar rollout via GitOps/Argo CD
+        mlops.passos-magicos/reload-at: "bootstrap"
+    spec:
+      containers:
+        - name: api
+          image: pagottoo/passos-magicos-api:v0.0.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: passos-magicos-config
+            - secretRef:
+                name: mlflow-tracking-auth
+                optional: true
+          volumeMounts:
+            - name: models
+              mountPath: /app/models
+            - name: logs
+              mountPath: /app/logs
+            - name: feature-store
+              mountPath: /app/feature_store
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+        - name: logs
+          persistentVolumeClaim:
+            claimName: logs-pvc
+        - name: feature-store
+          persistentVolumeClaim:
+            claimName: feature-store-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: passos-magicos-api
+  namespace: passos-magicos
+  labels:
+    app: passos-magicos
+    component: api
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  selector:
+    app: passos-magicos
+    component: api
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: passos-magicos-dashboard
+  namespace: passos-magicos
+  labels:
+    app: passos-magicos
+    component: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: passos-magicos
+      component: dashboard
+  template:
+    metadata:
+      labels:
+        app: passos-magicos
+        component: dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: pagottoo/passos-magicos-dashboard:v0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8501
+              name: http
+          env:
+            - name: API_URL
+              value: "http://passos-magicos-api:8000"
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8501
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: logs-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: passos-magicos-dashboard
+  namespace: passos-magicos
+  labels:
+    app: passos-magicos
+    component: dashboard
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8501
+      targetPort: 8501
+      protocol: TCP
+      name: http
+  selector:
+    app: passos-magicos
+    component: dashboard

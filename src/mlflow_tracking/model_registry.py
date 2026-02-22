@@ -4,12 +4,11 @@ Model Registry - MLflow Model Management
 Responsável por:
 - Registrar modelos no MLflow Model Registry
 - Gerenciar versões de modelos
-- Transicionar modelos entre stages (Staging, Production, Archived)
+- Transicionar modelos via aliases (staging, production)
 - Carregar modelos para inferência
 """
 import os
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from typing import Dict, List, Optional
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -26,6 +25,12 @@ class ModelStage:
     STAGING = "Staging"
     PRODUCTION = "Production"
     ARCHIVED = "Archived"
+
+
+class ModelAlias:
+    """Aliases usados no Model Registry."""
+    STAGING = "staging"
+    PRODUCTION = "production"
 
 
 class ModelRegistry:
@@ -72,6 +77,55 @@ class ModelRegistry:
         self.client = MlflowClient()
         
         logger.info("model_registry_initialized", tracking_uri=self.tracking_uri)
+
+    def _normalize_stage(self, stage: str) -> str:
+        """Normaliza o nome do stage para as constantes internas."""
+        if not stage:
+            return ModelStage.NONE
+
+        value = stage.strip().lower()
+        if value == "staging":
+            return ModelStage.STAGING
+        if value == "production":
+            return ModelStage.PRODUCTION
+        if value == "archived":
+            return ModelStage.ARCHIVED
+        if value == "none":
+            return ModelStage.NONE
+        return stage
+
+    def _stage_to_alias(self, stage: str) -> Optional[str]:
+        """Mapeia stage legado para alias moderno."""
+        normalized = self._normalize_stage(stage)
+        if normalized == ModelStage.STAGING:
+            return ModelAlias.STAGING
+        if normalized == ModelStage.PRODUCTION:
+            return ModelAlias.PRODUCTION
+        return None
+
+    def _get_model_version_by_alias(
+        self, name: str, alias: str
+    ) -> Optional[mlflow.entities.model_registry.ModelVersion]:
+        """Obtém versão por alias, retornando None quando não existe."""
+        try:
+            return self.client.get_model_version_by_alias(name, alias)
+        except MlflowException:
+            return None
+
+    def _remove_alias_if_points_to_version(self, name: str, alias: str, version: int) -> None:
+        """Remove alias quando ele aponta para uma versão específica."""
+        current = self._get_model_version_by_alias(name, alias)
+        if current is None or str(current.version) != str(version):
+            return
+
+        delete_alias = getattr(self.client, "delete_registered_model_alias", None)
+        if delete_alias is None:
+            return
+
+        try:
+            delete_alias(name, alias)
+        except MlflowException:
+            logger.warning("model_alias_remove_failed", name=name, alias=alias, version=version)
     
     def register_model(
         self,
@@ -145,24 +199,53 @@ class ModelRegistry:
         Returns:
             ModelVersion atualizada
         """
-        if stage not in [ModelStage.STAGING, ModelStage.PRODUCTION, ModelStage.ARCHIVED, ModelStage.NONE]:
+        normalized_stage = self._normalize_stage(stage)
+        if normalized_stage not in [ModelStage.STAGING, ModelStage.PRODUCTION, ModelStage.ARCHIVED, ModelStage.NONE]:
             raise ValueError(f"Stage inválido: {stage}")
-        
-        model_version = self.client.transition_model_version_stage(
-            name=name,
-            version=str(version),
-            stage=stage,
-            archive_existing_versions=archive_existing_versions
-        )
-        
-        logger.info(
-            "model_stage_transitioned",
-            name=name,
-            version=version,
-            new_stage=stage
-        )
-        
-        return model_version
+
+        alias = self._stage_to_alias(normalized_stage)
+        if alias:
+            # API moderna do MLflow: aliases substituem stages legados.
+            self.client.set_registered_model_alias(name=name, alias=alias, version=str(version))
+            model_version = self.client.get_model_version(name=name, version=str(version))
+
+            logger.info(
+                "model_alias_updated",
+                name=name,
+                version=version,
+                alias=alias,
+                stage=normalized_stage,
+            )
+            return model_version
+
+        # Stages legados não mapeados para alias: mantém apenas metadado e
+        # remove aliases de serving quando aplicável.
+        if normalized_stage in [ModelStage.ARCHIVED, ModelStage.NONE]:
+            self._remove_alias_if_points_to_version(name, ModelAlias.PRODUCTION, version)
+            self._remove_alias_if_points_to_version(name, ModelAlias.STAGING, version)
+
+            try:
+                self.client.set_model_version_tag(name, str(version), "lifecycle_stage", normalized_stage)
+            except MlflowException:
+                logger.warning(
+                    "model_lifecycle_tag_failed",
+                    name=name,
+                    version=version,
+                    stage=normalized_stage,
+                )
+
+            model_version = self.client.get_model_version(name=name, version=str(version))
+            logger.info(
+                "model_lifecycle_updated",
+                name=name,
+                version=version,
+                stage=normalized_stage,
+                archive_existing_versions=archive_existing_versions,
+            )
+            return model_version
+
+        # Guard clause (não deve acontecer, mas deixa fluxo explícito).
+        raise ValueError(f"Stage inválido: {stage}")
     
     def promote_to_staging(self, name: str, version: int) -> mlflow.entities.model_registry.ModelVersion:
         """Promove modelo para Staging."""
@@ -192,21 +275,39 @@ class ModelRegistry:
             Lista de ModelVersion
         """
         try:
-            versions = self.client.get_latest_versions(name, stages=stages)
-            return versions
+            if stages:
+                versions: List[mlflow.entities.model_registry.ModelVersion] = []
+                for stage in stages:
+                    alias = self._stage_to_alias(stage)
+                    if alias:
+                        mv = self._get_model_version_by_alias(name, alias)
+                        if mv:
+                            versions.append(mv)
+                        continue
+
+                    # Fallback para filtros não mapeados em alias.
+                    normalized = self._normalize_stage(stage)
+                    candidates = [
+                        v for v in self.search_model_versions(f"name='{name}'")
+                        if self._normalize_stage(getattr(v, "current_stage", ModelStage.NONE)) == normalized
+                    ]
+                    if candidates:
+                        versions.append(sorted(candidates, key=lambda x: int(x.version), reverse=True)[0])
+                return versions
+
+            versions = self.search_model_versions(f"name='{name}'")
+            return sorted(versions, key=lambda x: int(x.version), reverse=True)
         except MlflowException:
             logger.warning("model_not_found", name=name)
             return []
     
     def get_production_version(self, name: str = DEFAULT_MODEL_NAME) -> Optional[mlflow.entities.model_registry.ModelVersion]:
         """Obtém a versão em produção."""
-        versions = self.get_latest_versions(name, stages=[ModelStage.PRODUCTION])
-        return versions[0] if versions else None
+        return self._get_model_version_by_alias(name, ModelAlias.PRODUCTION)
     
     def get_staging_version(self, name: str = DEFAULT_MODEL_NAME) -> Optional[mlflow.entities.model_registry.ModelVersion]:
         """Obtém a versão em staging."""
-        versions = self.get_latest_versions(name, stages=[ModelStage.STAGING])
-        return versions[0] if versions else None
+        return self._get_model_version_by_alias(name, ModelAlias.STAGING)
     
     def load_model(
         self,
@@ -228,12 +329,16 @@ class ModelRegistry:
         if version:
             model_uri = f"models:/{name}/{version}"
         elif stage:
-            model_uri = f"models:/{name}/{stage}"
+            alias = self._stage_to_alias(stage)
+            if alias:
+                model_uri = f"models:/{name}@{alias}"
+            else:
+                model_uri = f"models:/{name}/{stage}"
         else:
             # Padrão: Production, se não existir, última versão
             prod_version = self.get_production_version(name)
             if prod_version:
-                model_uri = f"models:/{name}/{ModelStage.PRODUCTION}"
+                model_uri = f"models:/{name}@{ModelAlias.PRODUCTION}"
             else:
                 model_uri = f"models:/{name}/latest"
         
@@ -266,11 +371,22 @@ class ModelRegistry:
             Dicionário com detalhes da versão
         """
         mv = self.client.get_model_version(name, str(version))
+
+        detected_stage = self._normalize_stage(getattr(mv, "current_stage", ModelStage.NONE))
+        if detected_stage in [ModelStage.NONE, "", None]:
+            prod = self.get_production_version(name)
+            staging = self.get_staging_version(name)
+            if prod and str(prod.version) == str(mv.version):
+                detected_stage = ModelStage.PRODUCTION
+            elif staging and str(staging.version) == str(mv.version):
+                detected_stage = ModelStage.STAGING
+            else:
+                detected_stage = ModelStage.NONE
         
         return {
             "name": mv.name,
             "version": mv.version,
-            "stage": mv.current_stage,
+            "stage": detected_stage,
             "status": mv.status,
             "source": mv.source,
             "run_id": mv.run_id,
@@ -361,6 +477,9 @@ class ModelRegistry:
         if version:
             return f"models:/{name}/{version}"
         elif stage:
+            alias = self._stage_to_alias(stage)
+            if alias:
+                return f"models:/{name}@{alias}"
             return f"models:/{name}/{stage}"
         else:
             return f"models:/{name}/latest"
@@ -390,7 +509,8 @@ class ModelRegistry:
         }
         
         for model in models:
-            versions = self.get_latest_versions(model.name)
+            prod = self.get_production_version(model.name)
+            staging = self.get_staging_version(model.name)
             
             model_info = {
                 "name": model.name,
@@ -398,10 +518,15 @@ class ModelRegistry:
                 "latest_versions": {}
             }
             
-            for v in versions:
-                model_info["latest_versions"][v.current_stage] = {
-                    "version": v.version,
-                    "status": v.status
+            if prod:
+                model_info["latest_versions"][ModelStage.PRODUCTION] = {
+                    "version": prod.version,
+                    "status": prod.status
+                }
+            if staging:
+                model_info["latest_versions"][ModelStage.STAGING] = {
+                    "version": staging.version,
+                    "status": staging.status
                 }
             
             status["models"].append(model_info)

@@ -1,0 +1,151 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passos-magicos-train-config
+  namespace: passos-magicos
+data:
+  TRAIN_DATA_SOURCE: "s3"
+  TRAIN_S3_URI: "s3://passos-magicos-dados-training/dados/Bases antigas/PEDE_PASSOS_DATASET_FIAP.csv"
+  TRAIN_DATA_YEAR: "2022"
+  TRAIN_MODEL_TYPE: "random_forest"
+  TRAIN_PROMOTE_TO_STAGING: "true"
+  TRAIN_LOCAL_DOWNLOAD_PATH: "/tmp/passos_magicos_training.csv"
+  MLFLOW_EXPERIMENT_NAME: "passos-magicos-ponto-virada"
+  MLFLOW_MODEL_NAME: "passos-magicos-ponto-virada"
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: passos-magicos-train
+  namespace: passos-magicos
+  labels:
+    app: passos-magicos
+    component: training
+spec:
+  schedule: "0 6 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: passos-magicos
+            component: training
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: trainer
+              image: pagottoo/passos-magicos-api:v0.0.1
+              imagePullPolicy: Always
+              command: ["/bin/sh", "-c"]
+              args:
+                - python scripts/train_model.py
+              envFrom:
+                - configMapRef:
+                    name: passos-magicos-config
+                - configMapRef:
+                    name: passos-magicos-train-config
+                - secretRef:
+                    name: mlops-data-creds
+                - secretRef:
+                    name: mlflow-tracking-auth
+                    optional: true
+              resources:
+                requests:
+                  memory: "512Mi"
+                  cpu: "500m"
+                limits:
+                  memory: "2Gi"
+                  cpu: "1500m"
+              volumeMounts:
+                - name: models
+                  mountPath: /app/models
+                - name: logs
+                  mountPath: /app/logs
+                - name: feature-store
+                  mountPath: /app/feature_store
+          volumes:
+            - name: models
+              persistentVolumeClaim:
+                claimName: models-pvc
+            - name: logs
+              persistentVolumeClaim:
+                claimName: logs-pvc
+            - name: feature-store
+              persistentVolumeClaim:
+                claimName: feature-store-pvc
+
+# ---
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: passos-magicos-monitoring-config
+#   namespace: passos-magicos
+# data:
+#   ENVIRONMENT: "production"
+#   MONITORING_API_URL: "http://passos-magicos-api:8000"
+#   MONITORING_WINDOW_SIZE: "100"
+#   MONITORING_CLASS1_MIN: "0.10"
+#   MONITORING_CLASS1_MAX: "0.90"
+#   MONITORING_FAIL_ON_ALERT: "false"
+
+# ---
+# apiVersion: batch/v1
+# kind: CronJob
+# metadata:
+#   name: passos-magicos-monitoring
+#   namespace: passos-magicos
+#   labels:
+#     app: passos-magicos
+#     component: monitoring
+# spec:
+#   schedule: "0 */6 * * *"
+#   concurrencyPolicy: Forbid
+#   successfulJobsHistoryLimit: 2
+#   failedJobsHistoryLimit: 3
+#   jobTemplate:
+#     spec:
+#       backoffLimit: 1
+#       ttlSecondsAfterFinished: 86400
+#       template:
+#         metadata:
+#           labels:
+#             app: passos-magicos
+#             component: monitoring
+#         spec:
+#           restartPolicy: OnFailure
+#           containers:
+#             - name: monitoring
+#               image: pagottoo/passos-magicos-api:v0.0.1
+#               imagePullPolicy: Always
+#               command: ["/bin/sh", "-c"]
+#               args:
+#                 - python scripts/monitoring_job.py
+#               envFrom:
+#                 - configMapRef:
+#                     name: passos-magicos-config
+#                 - configMapRef:
+#                     name: passos-magicos-monitoring-config
+#                 - secretRef:
+#                     name: mlops-monitoring-alerts
+#                     optional: true
+#               resources:
+#                 requests:
+#                   memory: "256Mi"
+#                   cpu: "200m"
+#                 limits:
+#                   memory: "512Mi"
+#                   cpu: "500m"
+#               volumeMounts:
+#                 - name: logs
+#                   mountPath: /app/logs
+#           volumes:
+#             - name: logs
+#               persistentVolumeClaim:
+#                 claimName: logs-pvc

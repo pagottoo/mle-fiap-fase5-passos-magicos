@@ -56,24 +56,29 @@ class TestModelRegistryExtended:
 
     def test_transition_model_stage_valid(self, registry_with_mocks):
         registry, client = registry_with_mocks
-        client.transition_model_version_stage.return_value = SimpleNamespace(version="2", current_stage="Production")
+        client.get_model_version.return_value = SimpleNamespace(version="2", current_stage="Production")
 
         result = registry.transition_model_stage("m", 2, ModelStage.PRODUCTION)
         assert result.version == "2"
-        client.transition_model_version_stage.assert_called_once()
+        client.set_registered_model_alias.assert_called_once_with(
+            name="m",
+            alias="production",
+            version="2",
+        )
 
     def test_promote_helpers(self, registry_with_mocks):
         registry, client = registry_with_mocks
-        client.transition_model_version_stage.return_value = SimpleNamespace(version="4")
+        client.get_model_version.return_value = SimpleNamespace(version="4")
+        client.get_model_version_by_alias.return_value = None
 
         registry.promote_to_staging("m", 4)
         registry.promote_to_production("m", 4)
         registry.archive_model("m", 4)
-        assert client.transition_model_version_stage.call_count == 3
+        assert client.set_registered_model_alias.call_count == 2
 
     def test_get_latest_versions_handles_exception(self, registry_with_mocks):
         registry, client = registry_with_mocks
-        client.get_latest_versions.side_effect = MlflowException("missing")
+        client.search_model_versions.side_effect = MlflowException("missing")
 
         versions = registry.get_latest_versions("not-found")
         assert versions == []
@@ -83,7 +88,7 @@ class TestModelRegistryExtended:
         vprod = SimpleNamespace(version="8")
         vstag = SimpleNamespace(version="9")
 
-        with patch.object(registry, "get_latest_versions", side_effect=[[vprod], [vstag], []]):
+        with patch.object(registry, "_get_model_version_by_alias", side_effect=[vprod, vstag, None]):
             assert registry.get_production_version("m").version == "8"
             assert registry.get_staging_version("m").version == "9"
             assert registry.get_production_version("m2") is None
@@ -100,11 +105,11 @@ class TestModelRegistryExtended:
             load_model.assert_called_with("models:/m/5")
 
             registry.load_model(name="m", stage=ModelStage.STAGING)
-            load_model.assert_called_with("models:/m/Staging")
+            load_model.assert_called_with("models:/m@staging")
 
             with patch.object(registry, "get_production_version", return_value=SimpleNamespace(version="11")):
                 registry.load_model(name="m")
-                load_model.assert_called_with("models:/m/Production")
+                load_model.assert_called_with("models:/m@production")
 
             with patch.object(registry, "get_production_version", return_value=None):
                 registry.load_model(name="m")
@@ -162,7 +167,9 @@ class TestModelRegistryExtended:
         registry, client = registry_with_mocks
         client.search_model_versions.return_value = [SimpleNamespace(version="1")]
         client.search_registered_models.return_value = [SimpleNamespace(name="m")]
-        client.get_latest_versions.return_value = [SimpleNamespace(current_stage="Production", version="1", status="READY")]
+        client.get_model_version_by_alias.side_effect = lambda name, alias: (
+            SimpleNamespace(version="1", status="READY") if alias == "production" else None
+        )
 
         registry.delete_model_version("m", 1)
         registry.delete_registered_model("m")
@@ -170,7 +177,7 @@ class TestModelRegistryExtended:
         assert len(versions) == 1
 
         assert registry.get_model_uri("m", version=2) == "models:/m/2"
-        assert registry.get_model_uri("m", stage="Production") == "models:/m/Production"
+        assert registry.get_model_uri("m", stage="Production") == "models:/m@production"
         assert registry.get_model_uri("m") == "models:/m/latest"
 
         registry.set_model_version_tag("m", 1, "k", "v")

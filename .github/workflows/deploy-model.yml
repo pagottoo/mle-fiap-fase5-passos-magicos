@@ -51,7 +51,7 @@ env:
 jobs:
   # ==================== Validate ====================
   validate:
-    name: 🔍 Validate Model
+    name: Validate Model
     runs-on: ubuntu-latest
     
     outputs:
@@ -124,7 +124,7 @@ jobs:
       
       - name: Validation Summary
         run: |
-          echo "## 🔍 Model Validation" >> $GITHUB_STEP_SUMMARY
+          echo "## Model Validation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Version | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -137,7 +137,7 @@ jobs:
 
   # ==================== Deploy to Production ====================
   deploy-staging:
-    name: 🚀 Deploy to Staging
+    name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: validate
     if: inputs.target_stage == 'Staging' && inputs.action == 'promote'
@@ -162,7 +162,7 @@ jobs:
 
       - name: Promote to Staging
         run: |
-          echo "🚀 Promoting model to Staging..."
+          echo "Promoting model to Staging..."
 
           python -c "
           import sys
@@ -174,25 +174,25 @@ jobs:
           version = '${{ needs.validate.outputs.target_version }}'
 
           if version == 'None':
-              print('❌ No version to promote')
+              print('No version to promote')
               sys.exit(1)
 
           registry = ModelRegistry()
 
           print(f'Promoting {model_name} v{version} to Staging')
           registry.promote_to_staging(model_name, int(version))
-          print('✅ Model promoted to Staging')
+          print('Model promoted to Staging')
           "
 
       - name: Staging Summary
         run: |
-          echo "## 🚀 Staging Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "## Staging Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Model **${{ inputs.model_name }}** v${{ needs.validate.outputs.target_version }} deployed to **Staging**" >> $GITHUB_STEP_SUMMARY
+          echo "Model **${{ inputs.model_name }}** v${{ needs.validate.outputs.target_version }} deployed to **Staging**" >> $GITHUB_STEP_SUMMARY
 
   # ==================== Deploy to Production ====================
   deploy-production:
-    name: 🚀 Deploy to Production
+    name: Deploy to Production
     runs-on: ubuntu-latest
     needs: validate
     if: inputs.target_stage == 'Production' && inputs.action == 'promote'
@@ -226,7 +226,7 @@ jobs:
       
       - name: Promote to Production
         run: |
-          echo "🚀 Promoting model to Production..."
+          echo "Promoting model to Production..."
           
           python -c "
           import sys
@@ -238,14 +238,14 @@ jobs:
           version = '${{ needs.validate.outputs.target_version }}'
           
           if version == 'None':
-              print('❌ No version to promote')
+              print('No version to promote')
               sys.exit(1)
           
           registry = ModelRegistry()
           
           print(f'Promoting {model_name} v{version} to Production')
           registry.promote_to_production(model_name, int(version))
-          print('✅ Model promoted to Production')
+          print('Model promoted to Production')
           "
 
       - name: Update API reload annotation (GitOps)
@@ -311,9 +311,9 @@ jobs:
       
       - name: Deployment Summary
         run: |
-          echo "## 🚀 Production Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "## Production Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Model **${{ inputs.model_name }}** v${{ needs.validate.outputs.target_version }} deployed to **Production**" >> $GITHUB_STEP_SUMMARY
+          echo "Model **${{ inputs.model_name }}** v${{ needs.validate.outputs.target_version }} deployed to **Production**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Previous version: v${{ needs.validate.outputs.current_production_version }}" >> $GITHUB_STEP_SUMMARY
           echo "GitOps PR: ${{ steps.create_pr.outputs.pull-request-url || 'No PR created' }}" >> $GITHUB_STEP_SUMMARY
@@ -321,7 +321,7 @@ jobs:
 
   # ==================== Rollback ====================
   rollback:
-    name: ⏪ Rollback
+    name: Rollback
     runs-on: ubuntu-latest
     needs: validate
     if: inputs.action == 'rollback'
@@ -354,7 +354,7 @@ jobs:
       
       - name: Perform Rollback
         run: |
-          echo "⏪ Rolling back model..."
+          echo "Rolling back model..."
           
           python -c "
           import sys
@@ -366,14 +366,14 @@ jobs:
           target_version = '${{ inputs.version }}'
           
           if not target_version:
-              print('❌ Version required for rollback')
+              print('Version required for rollback')
               sys.exit(1)
           
           registry = ModelRegistry()
           
           print(f'Rolling back to {model_name} v{target_version}')
           registry.promote_to_production(model_name, int(target_version))
-          print('✅ Rollback complete')
+          print('Rollback complete')
           "
 
       - name: Update API reload annotation (GitOps)
@@ -439,7 +439,7 @@ jobs:
       
       - name: Rollback Summary
         run: |
-          echo "## ⏪ Rollback Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Rollback Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Model rolled back to version **v${{ inputs.version }}**" >> $GITHUB_STEP_SUMMARY
           echo "GitOps PR: ${{ steps.create_pr.outputs.pull-request-url || 'No PR created' }}" >> $GITHUB_STEP_SUMMARY
@@ -447,7 +447,7 @@ jobs:
 
   # ==================== Notify ====================
   notify:
-    name: 📢 Notify
+    name: Notify
     runs-on: ubuntu-latest
     needs: [validate, deploy-staging, deploy-production, rollback]
     if: always()
@@ -455,7 +455,7 @@ jobs:
     steps:
       - name: Send notification
         run: |
-          echo "## 📢 Deployment Notification" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Notification" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Stage | Status | GitOps PR |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|-----------|" >> $GITHUB_STEP_SUMMARY

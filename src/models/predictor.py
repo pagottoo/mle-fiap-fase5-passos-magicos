@@ -83,7 +83,13 @@ class ModelPredictor:
     
     def _load_from_mlflow(self) -> None:
         """Carrega modelo do MLflow Model Registry."""
-        model_uri = f"models:/{self.mlflow_model_name}/{self.mlflow_stage}"
+        stage_ref = (self.mlflow_stage or "").strip()
+        if stage_ref.lower() == "production":
+            model_uri = f"models:/{self.mlflow_model_name}@production"
+        elif stage_ref.lower() == "staging":
+            model_uri = f"models:/{self.mlflow_model_name}@staging"
+        else:
+            model_uri = f"models:/{self.mlflow_model_name}/{self.mlflow_stage}"
         logger.info("loading_model_from_mlflow", model_uri=model_uri)
         
         # Carregar modelo sklearn do MLflow
