@@ -13,7 +13,6 @@ data:
   TRAIN_LOCAL_DOWNLOAD_PATH: "/tmp/passos_magicos_training.csv"
   MLFLOW_EXPERIMENT_NAME: "passos-magicos-ponto-virada"
   MLFLOW_MODEL_NAME: "passos-magicos-ponto-virada"
-
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -41,7 +40,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: trainer
-              image: pagottoo/passos-magicos-api:v0.0.1
+              image: pagottoo/passos-magicos-api:v0.0.2
               imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args:
@@ -80,72 +79,71 @@ spec:
             - name: feature-store
               persistentVolumeClaim:
                 claimName: feature-store-pvc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passos-magicos-monitoring-config
+  namespace: passos-magicos
+data:
+  ENVIRONMENT: "production"
+  MONITORING_API_URL: "http://passos-magicos-api:8000"
+  MONITORING_WINDOW_SIZE: "100"
+  MONITORING_CLASS1_MIN: "0.10"
+  MONITORING_CLASS1_MAX: "0.90"
+  MONITORING_FAIL_ON_ALERT: "false"
 
-# ---
-# apiVersion: v1
-# kind: ConfigMap
-# metadata:
-#   name: passos-magicos-monitoring-config
-#   namespace: passos-magicos
-# data:
-#   ENVIRONMENT: "production"
-#   MONITORING_API_URL: "http://passos-magicos-api:8000"
-#   MONITORING_WINDOW_SIZE: "100"
-#   MONITORING_CLASS1_MIN: "0.10"
-#   MONITORING_CLASS1_MAX: "0.90"
-#   MONITORING_FAIL_ON_ALERT: "false"
-
-# ---
-# apiVersion: batch/v1
-# kind: CronJob
-# metadata:
-#   name: passos-magicos-monitoring
-#   namespace: passos-magicos
-#   labels:
-#     app: passos-magicos
-#     component: monitoring
-# spec:
-#   schedule: "0 */6 * * *"
-#   concurrencyPolicy: Forbid
-#   successfulJobsHistoryLimit: 2
-#   failedJobsHistoryLimit: 3
-#   jobTemplate:
-#     spec:
-#       backoffLimit: 1
-#       ttlSecondsAfterFinished: 86400
-#       template:
-#         metadata:
-#           labels:
-#             app: passos-magicos
-#             component: monitoring
-#         spec:
-#           restartPolicy: OnFailure
-#           containers:
-#             - name: monitoring
-#               image: pagottoo/passos-magicos-api:v0.0.1
-#               imagePullPolicy: Always
-#               command: ["/bin/sh", "-c"]
-#               args:
-#                 - python scripts/monitoring_job.py
-#               envFrom:
-#                 - configMapRef:
-#                     name: passos-magicos-config
-#                 - configMapRef:
-#                     name: passos-magicos-monitoring-config
-#                 - secretRef:
-#                     name: mlops-monitoring-alerts
-#                     optional: true
-#               resources:
-#                 requests:
-#                   memory: "256Mi"
-#                   cpu: "200m"
-#                 limits:
-#                   memory: "512Mi"
-#                   cpu: "500m"
-#               volumeMounts:
-#                 - name: logs
-#                   mountPath: /app/logs
-#           volumes:
-#             - name: logs
-#               persistentVolumeClaim:
-#                 claimName: logs-pvc
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: passos-magicos-monitoring
+  namespace: passos-magicos
+  labels:
+    app: passos-magicos
+    component: monitoring
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: passos-magicos
+            component: monitoring
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: monitoring
+              image: pagottoo/passos-magicos-api:v0.0.2
+              imagePullPolicy: Always
+              command: ["/bin/sh", "-c"]
+              args:
+                - python scripts/monitoring_job.py
+              envFrom:
+                - configMapRef:
+                    name: passos-magicos-config
+                - configMapRef:
+                    name: passos-magicos-monitoring-config
+                - secretRef:
+                    name: mlops-monitoring-alerts
+                    optional: true
+              resources:
+                requests:
+                  memory: "256Mi"
+                  cpu: "200m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"
+              volumeMounts:
+                - name: logs
+                  mountPath: /app/logs
+          volumes:
+            - name: logs
+              persistentVolumeClaim:
+                claimName: logs-pvc

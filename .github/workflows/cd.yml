@@ -24,7 +24,7 @@ on:
       platforms:
         description: "Docker platforms (comma-separated)."
         required: false
-        default: "linux/amd64"
+        default: "linux/amd64,linux/arm64"
         type: string
 
 env:
@@ -41,8 +41,6 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       platforms: ${{ steps.platforms.outputs.platforms }}
-      api_image: ${{ steps.refs.outputs.api_image }}
-      dashboard_image: ${{ steps.refs.outputs.dashboard_image }}
 
     steps:
       - name: Checkout code
@@ -64,12 +62,10 @@ jobs:
       - name: Determine platforms
         id: platforms
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            PLATFORMS="linux/amd64,linux/arm64"
-          elif [ -n "${{ inputs.platforms }}" ]; then
+          if [ -n "${{ inputs.platforms }}" ]; then
             PLATFORMS="${{ inputs.platforms }}"
           else
-            PLATFORMS="linux/amd64"
+            PLATFORMS="linux/amd64,linux/arm64"
           fi
           echo "platforms=${PLATFORMS}" >> "$GITHUB_OUTPUT"
           echo "Platforms: ${PLATFORMS}"
@@ -181,16 +177,21 @@ jobs:
       - name: Update Kubernetes manifests
         run: |
           VERSION="${{ needs.build.outputs.version }}"
-          API_IMAGE="${{ needs.build.outputs.api_image }}"
-          DASHBOARD_IMAGE="${{ needs.build.outputs.dashboard_image }}"
+          API_IMAGE="${REGISTRY}/${REPO_OWNER}/${IMAGE_NAME}-api:${VERSION}"
+          DASHBOARD_IMAGE="${REGISTRY}/${REPO_OWNER}/${IMAGE_NAME}-dashboard:${VERSION}"
+
+          if [ -z "${VERSION}" ] || [ -z "${API_IMAGE}" ] || [ -z "${DASHBOARD_IMAGE}" ]; then
+            echo "Falha ao montar referências de imagem para atualização GitOps."
+            exit 1
+          fi
 
           if [ -f k8s/deployment.yaml ]; then
-            sed -i "s|image: .*/[^/]*-api:.*|image: ${API_IMAGE}|g" k8s/deployment.yaml
-            sed -i "s|image: .*/[^/]*-dashboard:.*|image: ${DASHBOARD_IMAGE}|g" k8s/deployment.yaml
+            sed -E -i "s|^([[:space:]]*)image:[[:space:]]+.*/[^/]*-api:.*$|\\1image: ${API_IMAGE}|g" k8s/deployment.yaml
+            sed -E -i "s|^([[:space:]]*)image:[[:space:]]+.*/[^/]*-dashboard:.*$|\\1image: ${DASHBOARD_IMAGE}|g" k8s/deployment.yaml
           fi
 
           if [ -f k8s/cronjob-train.yaml ]; then
-            sed -i "s|image: .*/[^/]*-api:.*|image: ${API_IMAGE}|g" k8s/cronjob-train.yaml
+            sed -E -i "s|^([[:space:]]*)image:[[:space:]]+.*/[^/]*-api:.*$|\\1image: ${API_IMAGE}|g" k8s/cronjob-train.yaml
           fi
 
           echo "Updated images in k8s manifests:"
@@ -210,8 +211,8 @@ jobs:
             Atualização automática de manifests para GitOps (Argo CD).
 
             Version: `${{ needs.build.outputs.version }}`
-            API image: `${{ needs.build.outputs.api_image }}`
-            Dashboard image: `${{ needs.build.outputs.dashboard_image }}`
+            API image: `${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}-api:${{ needs.build.outputs.version }}`
+            Dashboard image: `${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}-dashboard:${{ needs.build.outputs.version }}`
 
             Após merge, o Argo CD sincroniza o cluster.
           labels: |
@@ -244,8 +245,8 @@ jobs:
             ## Release ${{ needs.build.outputs.version }}
 
             ### Docker Images
-            - API: `${{ needs.build.outputs.api_image }}`
-            - Dashboard: `${{ needs.build.outputs.dashboard_image }}`
+            - API: `${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}-api:${{ needs.build.outputs.version }}`
+            - Dashboard: `${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}-dashboard:${{ needs.build.outputs.version }}`
 
             ### GitOps
             - Manifest PR: ${{ needs.gitops-pr.outputs.pull_request_url || 'No PR created' }}
