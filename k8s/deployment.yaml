@@ -24,7 +24,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: pagottoo/passos-magicos-api:v0.0.2
+          image: docker.io/pagottoo/passos-magicos-api:v0.0.3
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -119,7 +119,7 @@ spec:
     spec:
       containers:
         - name: dashboard
-          image: pagottoo/passos-magicos-dashboard:v0.0.2
+          image: docker.io/pagottoo/passos-magicos-dashboard:v0.0.3
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8501
