@@ -5,7 +5,9 @@
 # 2. Atualiza manifests Kubernetes via Pull Request (GitOps)
 # 3. Argo CD aplica mudanças após merge
 #
-# Não há kubectl apply direto neste workflow.
+# Gatilhos:
+# - Push de tags (e.g., v1.0.0)
+# - Execução manual (workflow_dispatch)
 
 name: CD Pipeline
 
@@ -22,13 +24,13 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}
+  REPO_OWNER: ${{ secrets.DOCKERHUB_USERNAME }}
   IMAGE_NAME: ${{ vars.IMAGE_NAME || 'passos-magicos' }}
   PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   build:
-    name: "🏗️ Build & Push Images"
+    name: "Build & Push Images"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,8 +60,8 @@ jobs:
         id: refs
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          API_IMAGE="${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}-api:${VERSION}"
-          DASHBOARD_IMAGE="${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}-dashboard:${VERSION}"
+          API_IMAGE="${REGISTRY}/${REPO_OWNER}/${IMAGE_NAME}-api:${VERSION}"
+          DASHBOARD_IMAGE="${REGISTRY}/${REPO_OWNER}/${IMAGE_NAME}-dashboard:${VERSION}"
           echo "api_image=${API_IMAGE}" >> "$GITHUB_OUTPUT"
           echo "dashboard_image=${DASHBOARD_IMAGE}" >> "$GITHUB_OUTPUT"
           echo "API image: ${API_IMAGE}"
@@ -71,7 +73,7 @@ jobs:
             echo "Configure os secrets DOCKERHUB_USERNAME e DOCKERHUB_TOKEN."
             exit 1
           fi
-          if [ -z "${IMAGE_NAMESPACE}" ]; then
+          if [ -z "${REPO_OWNER}" ]; then
             echo "Configure vars.DOCKERHUB_NAMESPACE ou DOCKERHUB_USERNAME."
             exit 1
           fi
@@ -93,7 +95,7 @@ jobs:
         id: meta-api
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}-api
+          images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}-api
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
             type=sha
@@ -114,7 +116,7 @@ jobs:
         id: meta-dashboard
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}-dashboard
+          images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}-dashboard
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
             type=sha
@@ -217,7 +219,7 @@ jobs:
       contents: write
     steps:
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2.5.0
         with:
           generate_release_notes: true
           body: |
