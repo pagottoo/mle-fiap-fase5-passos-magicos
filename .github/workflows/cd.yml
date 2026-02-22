@@ -21,12 +21,16 @@ on:
         description: "Version tag (e.g., v1.0.0). Optional."
         required: false
         type: string
+      platforms:
+        description: "Docker platforms (comma-separated)."
+        required: false
+        default: "linux/amd64"
+        type: string
 
 env:
   REGISTRY: docker.io
   REPO_OWNER: ${{ secrets.DOCKERHUB_USERNAME }}
   IMAGE_NAME: ${{ vars.IMAGE_NAME || 'passos-magicos' }}
-  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   build:
@@ -36,6 +40,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      platforms: ${{ steps.platforms.outputs.platforms }}
       api_image: ${{ steps.refs.outputs.api_image }}
       dashboard_image: ${{ steps.refs.outputs.dashboard_image }}
 
@@ -55,6 +60,19 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Version: ${VERSION}"
+
+      - name: Determine platforms
+        id: platforms
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            PLATFORMS="linux/amd64,linux/arm64"
+          elif [ -n "${{ inputs.platforms }}" ]; then
+            PLATFORMS="${{ inputs.platforms }}"
+          else
+            PLATFORMS="linux/amd64"
+          fi
+          echo "platforms=${PLATFORMS}" >> "$GITHUB_OUTPUT"
+          echo "Platforms: ${PLATFORMS}"
 
       - name: Set image refs
         id: refs
@@ -106,11 +124,11 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          platforms: ${{ env.PLATFORMS }}
+          platforms: ${{ steps.platforms.outputs.platforms }}
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=min
 
       - name: Extract metadata for Dashboard
         id: meta-dashboard
@@ -127,11 +145,11 @@ jobs:
           context: .
           file: ./Dockerfile.dashboard
           push: true
-          platforms: ${{ env.PLATFORMS }}
+          platforms: ${{ steps.platforms.outputs.platforms }}
           tags: ${{ steps.meta-dashboard.outputs.tags }}
           labels: ${{ steps.meta-dashboard.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,scope=dashboard,mode=min
 
       - name: Build summary
         run: |
@@ -140,7 +158,7 @@ jobs:
           echo "- Version: \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- API: \`${{ steps.refs.outputs.api_image }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Dashboard: \`${{ steps.refs.outputs.dashboard_image }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Platforms: \`${{ env.PLATFORMS }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Platforms: \`${{ steps.platforms.outputs.platforms }}\`" >> "$GITHUB_STEP_SUMMARY"
 
   gitops-pr:
     name: "GitOps PR (Argo CD)"

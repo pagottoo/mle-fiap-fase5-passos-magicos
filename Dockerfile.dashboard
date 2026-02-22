@@ -4,11 +4,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Instalar dependências
-RUN pip install --no-cache-dir \
-    streamlit>=1.29.0 \
-    plotly>=5.18.0 \
-    pandas>=2.0.0 \
-    requests>=2.31.0
+COPY requirements-dashboard.txt .
+RUN pip install --no-cache-dir -r requirements-dashboard.txt
 
 # Copiar código do dashboard
 COPY dashboard/ ./dashboard/
