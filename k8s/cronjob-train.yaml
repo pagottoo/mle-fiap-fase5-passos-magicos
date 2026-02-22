@@ -124,7 +124,7 @@ spec:
               imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args:
-                - python scripts/monitoring_job.py
+                - python -m scripts.monitoring_job
               envFrom:
                 - configMapRef:
                     name: passos-magicos-config
