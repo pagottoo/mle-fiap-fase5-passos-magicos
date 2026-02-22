@@ -1,26 +1,26 @@
-# Passos Magicos - Plataforma MLOps End-to-End
+# Passos Mágicos - Plataforma MLOps End-to-End
 
-Pipeline completo de Machine Learning para predicao de **Ponto de Virada** dos alunos da Passos Magicos, cobrindo:
+Pipeline completo de Machine Learning para predição de **Ponto de Virada** dos alunos da Passos Mágicos, cobrindo:
 
 - treinamento automatizado com dados no S3
 - registro e versionamento de modelos no MLflow
 - serving via API FastAPI
-- monitoramento de drift e distribuicao de predicoes
+- monitoramento de drift e distribuição de predições
 - alertas no Slack
 - deploy GitOps com Argo CD
 - CI/CD com GitHub Actions
 
 ## Objetivo do projeto
 
-Entregar um fluxo de MLOps de ponta a ponta, com rastreabilidade e operacao em cluster Kubernetes:
+Entregar um fluxo de MLOps de ponta a ponta, com rastreabilidade e operação em cluster Kubernetes:
 
 1. Treinar modelo periodicamente.
-2. Registrar versoes no MLflow.
+2. Registrar versões no MLflow.
 3. Promover modelo para serving com controle de rollout.
-4. Monitorar sinais de degradacao/drift.
+4. Monitorar sinais de degradação/drift.
 5. Alertar rapidamente o time em caso de anomalia.
 
-## Arquitetura (visao geral)
+## Arquitetura (visão geral)
 
 ```mermaid
 graph LR
@@ -42,73 +42,73 @@ graph LR
 
 | Componente | Papel |
 |---|---|
-| `api/main.py` | API de predicao, metricas, endpoints de alerta e reload de modelo |
-| `scripts/train_model.py` | Pipeline de treino (local/S3), registro no MLflow e promocao para Staging |
+| `api/main.py` | API de predição, métricas, endpoints de alerta e reload de modelo |
+| `scripts/train_model.py` | Pipeline de treino (local/S3), registro no MLflow e promoção para Staging |
 | `scripts/monitoring_job.py` | Job in-cluster para drift/performance + envio direto para Slack |
-| `src/mlflow_tracking/*` | Tracking de experimentos e registry com estrategia por alias |
+| `src/mlflow_tracking/*` | Tracking de experimentos e registry com estratégia por alias |
 | `src/feature_store/*` | Feature Store offline (Parquet) + online (SQLite) |
 | `k8s/deployment.yaml` | Deploy da API e dashboard |
 | `k8s/cronjob-train.yaml` | CronJobs de treino e monitoramento |
 | `.github/workflows/ci.yml` | Qualidade, testes e build de imagem |
 | `.github/workflows/cd.yml` | Build/push multi-arch + PR GitOps de release |
-| `.github/workflows/deploy-model.yml` | Promocao/rollback de modelo com PR GitOps para rollout |
+| `.github/workflows/deploy-model.yml` | Promoção/rollback de modelo com PR GitOps para rollout |
 
-## Estrutura do repositorio
+## Estrutura do repositório
 
 ```text
 api/                    # FastAPI
-src/                    # Codigo de ML, feature store, monitoramento, mlflow
+src/                    # Código de ML, feature store, monitoramento, mlflow
 scripts/                # Jobs e demos operacionais
 k8s/                    # Manifests de deploy e cronjobs
 argocd/                 # Application Argo CD + valores do MLflow e Postgres
 .github/workflows/      # CI/CD e deploy de modelo
-Dockerfile              # Imagem da API (tambem usada pelos jobs)
+Dockerfile              # Imagem da API (também usada pelos jobs)
 Dockerfile.dashboard    # Imagem do dashboard Streamlit
-Makefile                # Atalhos de setup, treino, testes e execucao local
+Makefile                # Atalhos de setup, treino, testes e execução local
 ```
 
-## Fluxos de negocio e operacao
+## Fluxos de negócio e operação
 
 ### 1) Treinamento
 
 1. CronJob `passos-magicos-train` baixa dataset do S3.
 2. Preprocessa dados e faz feature engineering.
-3. Treina modelo (`random_forest` por padrao).
+3. Treina modelo (`random_forest` por padrão).
 4. Registra experimento e modelo no MLflow.
-5. Promove versao mais recente para alias `staging`.
-6. Materializa features no online store para inferencia.
+5. Promove versão mais recente para alias `staging`.
+6. Materializa features no online store para inferência.
 
 Schedule atual (`k8s/cronjob-train.yaml`):
 - treino: `0 6 * * 1` (semanal)
 - monitoramento: `0 */6 * * *` (a cada 6h)
 
-Observacao: o timezone do CronJob depende do timezone do cluster (normalmente UTC).
+Observação: o timezone do CronJob depende do timezone do cluster (normalmente UTC).
 
 ### 2) Serving
 
-A API carrega modelo por estrategia de runtime:
+A API carrega modelo por estratégia de runtime:
 
-- `MODEL_SOURCE=mlflow`: carrega do MLflow Registry (recomendado em producao)
+- `MODEL_SOURCE=mlflow`: carrega do MLflow Registry (recomendado em produção)
 - `MODEL_SOURCE=local`: carrega arquivo local em `models/`
 
-Para MLflow, o stage configurado em `MLFLOW_MODEL_STAGE` e resolvido para alias (`@production` / `@staging`).
+Para MLflow, o stage configurado em `MLFLOW_MODEL_STAGE` é resolvido para alias (`@production` / `@staging`).
 
 ### 3) Monitoramento
 
 O job `scripts/monitoring_job.py` executa dois checks:
 
 1. **Prediction drift** com base em `logs/predictions.jsonl`.
-2. **Distribuicao de classes** consultando `GET /metrics` da API.
+2. **Distribuição de classes** consultando `GET /metrics` da API.
 
 Se houver anomalia, envia alerta direto para Slack via `SLACK_WEBHOOK_URL`.
 
 ### 4) Deploy e GitOps
 
 - `cd.yml` gera imagens (`api` e `dashboard`), push no Docker Hub e abre PR atualizando manifests em `k8s/`.
-- Argo CD sincroniza o cluster apos merge.
-- `deploy-model.yml` promove/rollback no MLflow e abre PR GitOps para alterar annotation `mlops.passos-magicos/reload-at`, forcando rollout controlado da API.
+- Argo CD sincroniza o cluster após merge.
+- `deploy-model.yml` promove/rollback no MLflow e abre PR GitOps para alterar annotation `mlops.passos-magicos/reload-at`, forçando rollout controlado da API.
 
-## Setup local rapido
+## Setup local rápido
 
 ### Requisitos
 
@@ -137,14 +137,14 @@ make dashboard
 docker compose up --build
 ```
 
-Servicos locais:
+Serviços locais:
 
 - API: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
 - Dashboard: `http://localhost:8501`
 - MLflow: `http://localhost:5000`
 
-## Comandos uteis de desenvolvimento
+## Comandos úteis de desenvolvimento
 
 ```bash
 make test
@@ -155,22 +155,22 @@ make docker-up
 make docker-down
 ```
 
-## Variaveis de ambiente importantes
+## Variáveis de ambiente importantes
 
 Base: `.env.example`
 
-| Variavel | Uso |
+| Variável | Uso |
 |---|---|
 | `MLFLOW_TRACKING_URI` | Endpoint do MLflow |
 | `MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD` | Auth do MLflow (quando habilitado) |
 | `MLFLOW_MODEL_NAME` | Nome do modelo no registry |
-| `MLFLOW_MODEL_STAGE` | Stage logico (`Staging`/`Production`) |
+| `MLFLOW_MODEL_STAGE` | Stage lógico (`Staging`/`Production`) |
 | `MODEL_SOURCE` | `mlflow` ou `local` |
 | `MODEL_FALLBACK_LOCAL` | fallback para arquivo local se MLflow falhar |
 | `ADMIN_RELOAD_TOKEN` | token do endpoint `/admin/reload-model` |
 | `SLACK_WEBHOOK_URL` | webhook do Slack para alertas |
 | `DRIFT_THRESHOLD` | threshold de drift no detector |
-| `PERFORMANCE_WINDOW` | janela de analise de predicoes |
+| `PERFORMANCE_WINDOW` | janela de análise de predições |
 
 ## Endpoints principais da API
 
@@ -193,8 +193,8 @@ Base: `.env.example`
 ### CI (`.github/workflows/ci.yml`)
 
 - lint (`black`, `isort`, `flake8`, `mypy`)
-- testes com cobertura minima de 90%
-- scan de seguranca (`safety`, `bandit`)
+- testes com cobertura mínima de 90%
+- scan de segurança (`safety`, `bandit`)
 - build de imagens para validar Dockerfiles
 
 ### CD (`.github/workflows/cd.yml`)
@@ -202,7 +202,7 @@ Base: `.env.example`
 Trigger:
 
 - push em tag `v*`
-- execucao manual (`workflow_dispatch`)
+- execução manual (`workflow_dispatch`)
 
 Fluxo:
 
@@ -210,7 +210,7 @@ Fluxo:
 2. PR GitOps com update de `k8s/deployment.yaml` e `k8s/cronjob-train.yaml`
 3. release no GitHub (quando trigger por tag)
 
-Plataformas padrao de build:
+Plataformas padrão de build:
 - `linux/amd64,linux/arm64`
 
 ### Deploy de modelo (`.github/workflows/deploy-model.yml`)
@@ -218,15 +218,15 @@ Plataformas padrao de build:
 Fluxos manuais:
 
 - `promote` para `Staging` ou `Production`
-- `rollback` para versao especifica
+- `rollback` para versão específica
 
-Ao promover/rollback para producao, o workflow abre PR GitOps para rollout da API.
+Ao promover/rollback para produção, o workflow abre PR GitOps para rollout da API.
 
-## Segredos e configuracoes necessarias
+## Segredos e configurações necessárias
 
 ### 1) GitHub Actions (repo secrets/vars)
 
-**Secrets obrigatorios para CD:**
+**Secrets obrigatórios para CD:**
 
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
@@ -241,7 +241,7 @@ Ao promover/rollback para producao, o workflow abre PR GitOps para rollout da AP
 
 - `IMAGE_NAME` (default: `passos-magicos`)
 
-**Importante nas configuracoes do repositorio:**
+**Importante nas configurações do repositório:**
 
 - `Settings > Actions > General > Workflow permissions`: habilitar `Read and write permissions`
 - `Allow GitHub Actions to create and approve pull requests`: habilitar
@@ -271,8 +271,8 @@ Chaves recomendadas:
 
 Notas:
 
-- `mlflow-tracking-auth` e `mlops-monitoring-alerts` estao com `optional: true` nos manifests.
-- sem `SLACK_WEBHOOK_URL`, o monitoramento continua, mas nao envia notificacao.
+- `mlflow-tracking-auth` e `mlops-monitoring-alerts` estão com `optional: true` nos manifests.
+- sem `SLACK_WEBHOOK_URL`, o monitoramento continua, mas não envia notificação.
 
 #### Volumes/PVCs esperados
 
@@ -282,7 +282,7 @@ Notas:
 
 ## Deploy no cluster
 
-### Aplicar manifests da aplicacao
+### Aplicar manifests da aplicação
 
 ```bash
 kubectl apply -f k8s/deployment.yaml
@@ -293,7 +293,7 @@ kubectl apply -f k8s/cronjob-train.yaml
 
 Application principal:
 
-- `argocd/application.yaml` (path `k8s`, sync automatica com `prune` e `selfHeal`)
+- `argocd/application.yaml` (path `k8s`, sync automática com `prune` e `selfHeal`)
 
 Arquivos auxiliares para stack MLflow:
 
@@ -316,7 +316,7 @@ kubectl -n passos-magicos create job --from=cronjob/passos-magicos-monitoring mo
 kubectl -n passos-magicos logs -f job/<job-name>
 ```
 
-### Verificar metricas da API no cluster
+### Verificar métricas da API no cluster
 
 ```bash
 kubectl -n passos-magicos port-forward svc/passos-magicos-api 8000:8000
@@ -324,7 +324,7 @@ curl -s http://localhost:8000/health
 curl -s http://localhost:8000/metrics
 ```
 
-### Promover modelo para producao via workflow
+### Promover modelo para produção via workflow
 
 ```bash
 gh workflow run deploy-model.yml \
@@ -342,29 +342,29 @@ gh workflow run deploy-model.yml \
   -f version=<VERSAO>
 ```
 
-## Troubleshooting rapido
+## Troubleshooting rápido
 
 ### `ModuleNotFoundError: No module named 'src'` no job de monitoramento
 
-Status atual do projeto: corrigido com execucao modular e ajuste de `sys.path`.
+Status atual do projeto: corrigido com execução modular e ajuste de `sys.path`.
 
 - CronJob usa: `python -m scripts.monitoring_job`
 - script injeta raiz do projeto no path
 
 ### `[alert] SLACK_WEBHOOK_URL not configured`
 
-Significa que o secret `mlops-monitoring-alerts` nao tem a chave `SLACK_WEBHOOK_URL` ou nao foi associado ao pod.
+Significa que o secret `mlops-monitoring-alerts` não tem a chave `SLACK_WEBHOOK_URL` ou não foi associado ao pod.
 
 ### Workflow falha ao criar PR GitOps
 
-Verifique as permissoes do repositorio:
+Verifique as permissões do repositório:
 
 - `Read and write permissions`
 - `Allow GitHub Actions to create and approve pull requests`
 
-## Boas praticas de versionamento
+## Boas práticas de versionamento
 
-Artefatos operacionais nao devem ser versionados. O `.gitignore` ja protege:
+Artefatos operacionais não devem ser versionados. O `.gitignore` já protege:
 
 - `models/*` (mantendo `models/.gitkeep`)
 - `mlruns/`
@@ -372,6 +372,6 @@ Artefatos operacionais nao devem ser versionados. O `.gitignore` ja protege:
 - `feature_store/online/`
 - `logs/*.jsonl`
 
-## Licenca
+## Licença
 
-Este projeto esta sob a licenca MIT. Consulte `LICENSE`.
+Este projeto está sob a licença MIT. Consulte `LICENSE`.
