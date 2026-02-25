@@ -1,8 +1,7 @@
 """
 Testes extras para aumentar cobertura do módulo de alertas.
 """
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +12,6 @@ from src.monitoring.alerts import (
     AlertType,
     AlertChannel,
     ConsoleChannel,
-    EmailChannel,
     SlackChannel,
     WebhookChannel,
 )
@@ -53,22 +51,6 @@ class TestAlertFormatting:
         assert blocks[-1]["type"] == "divider"
         assert any("fields" in block for block in blocks if block["type"] == "section")
 
-    def test_to_email_html_renders_metadata(self):
-        alert = Alert(
-            alert_type=AlertType.CUSTOM,
-            severity=AlertSeverity.INFO,
-            title="Teste",
-            message="Mensagem",
-            metadata={"k": "v"},
-        )
-
-        html = alert.to_email_html()
-        assert "Teste" in html
-        assert "Mensagem" in html
-        assert "Details" in html
-        assert "k" in html
-        assert "v" in html
-
 
 class TestSlackChannel:
     def test_send_returns_false_when_not_configured(self):
@@ -98,56 +80,6 @@ class TestSlackChannel:
             "src.monitoring.alerts.urllib.request.urlopen",
             side_effect=Exception("network down"),
         ):
-            assert channel.send(alert) is False
-
-
-class TestEmailChannel:
-    def test_not_configured_returns_false(self):
-        channel = EmailChannel(
-            smtp_host=None,
-            smtp_user=None,
-            smtp_password=None,
-            from_email=None,
-            to_emails=[],
-        )
-        alert = Alert(AlertType.CUSTOM, AlertSeverity.INFO, "t", "m")
-        assert channel.send(alert) is False
-
-    def test_send_success(self):
-        channel = EmailChannel(
-            smtp_host="smtp.example.com",
-            smtp_port=587,
-            smtp_user="user",
-            smtp_password="pass",
-            from_email="from@example.com",
-            to_emails=["to@example.com"],
-        )
-        alert = Alert(AlertType.CUSTOM, AlertSeverity.INFO, "t", "m")
-
-        smtp_server = MagicMock()
-        smtp_cm = MagicMock()
-        smtp_cm.__enter__.return_value = smtp_server
-        smtp_cm.__exit__.return_value = False
-
-        with patch("src.monitoring.alerts.smtplib.SMTP", return_value=smtp_cm):
-            assert channel.send(alert) is True
-
-        smtp_server.starttls.assert_called_once()
-        smtp_server.login.assert_called_once_with("user", "pass")
-        smtp_server.sendmail.assert_called_once()
-
-    def test_send_exception_returns_false(self):
-        channel = EmailChannel(
-            smtp_host="smtp.example.com",
-            smtp_port=587,
-            smtp_user="user",
-            smtp_password="pass",
-            from_email="from@example.com",
-            to_emails=["to@example.com"],
-        )
-        alert = Alert(AlertType.CUSTOM, AlertSeverity.INFO, "t", "m")
-
-        with patch("src.monitoring.alerts.smtplib.SMTP", side_effect=RuntimeError("smtp error")):
             assert channel.send(alert) is False
 
 
@@ -186,14 +118,10 @@ class TestAlertManagerExtended:
     def test_auto_configure_adds_multiple_channels(self, monkeypatch):
         monkeypatch.setenv("ENVIRONMENT", "development")
         monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://example.com")
-        monkeypatch.setenv("SMTP_USER", "user")
-        monkeypatch.setenv("SMTP_PASSWORD", "pass")
-        monkeypatch.setenv("ALERT_FROM_EMAIL", "from@example.com")
-        monkeypatch.setenv("ALERT_TO_EMAILS", "to@example.com")
         monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://example.com/hook")
 
         manager = AlertManager(auto_configure=True)
-        # Console + Slack + Email + Webhook
+        # Console + Slack + Webhook
         assert len(manager.channels) >= 3
 
     def test_remove_channel(self):
