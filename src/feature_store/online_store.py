@@ -1,5 +1,5 @@
 """
-Online Store - Armazenamento para inferência (low latency)
+Online Store - low-latency storage for inference.
 """
 import sqlite3
 import pandas as pd
@@ -15,22 +15,22 @@ logger = structlog.get_logger()
 
 class OnlineStore:
     """
-    Store online para features de inferência.
-    
-    Usa SQLite para armazenamento rápido e baixa latência.
-    Ideal para serving de features em tempo real.
+    Online store for serving features.
+
+    Uses SQLite for fast low-latency reads.
+    Suitable for real-time inference workloads.
     """
     
     def __init__(self, db_path: Optional[Path] = None):
         """
-        Inicializa o online store.
-        
+        Initialize online store.
+
         Args:
-            db_path: Caminho para o banco de dados SQLite
+            db_path: SQLite database path.
         """
         if db_path:
             self.db_path = db_path
-            # Garantir que o diretório existe
+            # Ensure parent directory exists
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         else:
             store_dir = Path(__file__).parent.parent.parent / "feature_store" / "online"
@@ -40,11 +40,11 @@ class OnlineStore:
         self._init_db()
     
     def _init_db(self) -> None:
-        """Inicializa o banco de dados."""
+        """Initialize internal SQLite tables."""
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        # Tabela de metadados
+        # Metadata table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS feature_tables (
                 table_name TEXT PRIMARY KEY,
@@ -55,7 +55,7 @@ class OnlineStore:
             )
         """)
         
-        # Tabela de log de acesso
+        # Access log table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS access_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +69,7 @@ class OnlineStore:
         conn.close()
     
     def _get_connection(self) -> sqlite3.Connection:
-        """Obtém conexão com o banco."""
+        """Return a SQLite connection."""
         return sqlite3.connect(str(self.db_path))
     
     def materialize(
@@ -80,37 +80,37 @@ class OnlineStore:
         feature_columns: Optional[List[str]] = None
     ) -> int:
         """
-        Materializa features no online store.
-        
+        Materialize features into online store.
+
         Args:
-            df: DataFrame com features
-            table_name: Nome da tabela
-            entity_column: Coluna de identificação da entidade
-            feature_columns: Colunas de features (todas exceto entity se não fornecidas)
-            
+            df: Feature DataFrame.
+            table_name: Target table name.
+            entity_column: Entity identifier column.
+            feature_columns: Feature columns (all except entity when omitted).
+
         Returns:
-            Número de registros materializados
+            Number of rows materialized.
         """
         if feature_columns is None:
             feature_columns = [c for c in df.columns if c != entity_column]
         
-        # Selecionar colunas
+        # Select columns
         columns = [entity_column] + feature_columns
         df_to_store = df[columns].copy()
         
-        # Adicionar timestamp de materialização
+        # Add materialization timestamp
         df_to_store["_materialized_at"] = datetime.now().isoformat()
         
         conn = self._get_connection()
         
-        # Criar/substituir tabela
+        # Create/replace table
         df_to_store.to_sql(table_name, conn, if_exists="replace", index=False)
         
-        # Criar índice na coluna de entidade
+        # Create index on entity column
         cursor = conn.cursor()
         cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_{entity_column} ON {table_name}({entity_column})")
         
-        # Atualizar metadados
+        # Update metadata
         cursor.execute("""
             INSERT OR REPLACE INTO feature_tables (table_name, entity_column, feature_columns, created_at, updated_at)
             VALUES (?, ?, ?, COALESCE((SELECT created_at FROM feature_tables WHERE table_name = ?), ?), ?)
@@ -142,30 +142,30 @@ class OnlineStore:
         feature_columns: Optional[List[str]] = None
     ) -> pd.DataFrame:
         """
-        Obtém features para entidades específicas.
-        
+        Fetch features for specific entities.
+
         Args:
-            table_name: Nome da tabela
-            entity_ids: IDs das entidades
-            feature_columns: Colunas a retornar (todas se não fornecidas)
-            
+            table_name: Source table.
+            entity_ids: Entity IDs.
+            feature_columns: Columns to return (all by default).
+
         Returns:
-            DataFrame com features
+            Feature DataFrame.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        # Obter metadados
+        # Read metadata
         cursor.execute("SELECT entity_column FROM feature_tables WHERE table_name = ?", (table_name,))
         result = cursor.fetchone()
         
         if not result:
             conn.close()
-            raise ValueError(f"Tabela '{table_name}' não encontrada")
+            raise ValueError(f"Table '{table_name}' not found")
         
         entity_column = result[0]
         
-        # Construir query
+        # Build SQL query
         if feature_columns:
             columns = [entity_column] + feature_columns
             columns_str = ", ".join(columns)
@@ -177,7 +177,7 @@ class OnlineStore:
         
         df = pd.read_sql_query(query, conn, params=entity_ids)
         
-        # Log de acesso
+        # Access log
         for entity_id in entity_ids:
             cursor.execute(
                 "INSERT INTO access_log (table_name, entity_id, accessed_at) VALUES (?, ?, ?)",
@@ -203,15 +203,15 @@ class OnlineStore:
         feature_columns: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Obtém vetor de features para uma única entidade.
-        
+        Fetch feature vector for a single entity.
+
         Args:
-            table_name: Nome da tabela
-            entity_id: ID da entidade
-            feature_columns: Colunas a retornar
-            
+            table_name: Source table.
+            entity_id: Entity ID.
+            feature_columns: Columns to return.
+
         Returns:
-            Dicionário com features
+            Feature dictionary.
         """
         df = self.get_features(table_name, [entity_id], feature_columns)
         
@@ -221,7 +221,7 @@ class OnlineStore:
         return df.iloc[0].to_dict()
     
     def list_tables(self) -> List[Dict[str, Any]]:
-        """Lista tabelas disponíveis."""
+        """List available tables."""
         conn = self._get_connection()
         cursor = conn.cursor()
         
@@ -242,7 +242,7 @@ class OnlineStore:
         ]
     
     def get_table_info(self, table_name: str) -> Optional[Dict[str, Any]]:
-        """Obtém informações de uma tabela."""
+        """Return metadata for a table."""
         conn = self._get_connection()
         cursor = conn.cursor()
         
@@ -256,7 +256,7 @@ class OnlineStore:
             conn.close()
             return None
         
-        # Contar registros
+        # Count rows
         cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
         count = cursor.fetchone()[0]
         
@@ -273,13 +273,13 @@ class OnlineStore:
     
     def delete_table(self, table_name: str) -> bool:
         """
-        Remove uma tabela.
-        
+        Drop table and delete its metadata.
+
         Args:
-            table_name: Nome da tabela
-            
+            table_name: Table name.
+
         Returns:
-            True se removida com sucesso
+            True when removed successfully.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -298,14 +298,14 @@ class OnlineStore:
     
     def get_access_stats(self, table_name: Optional[str] = None, days: int = 7) -> Dict[str, Any]:
         """
-        Obtém estatísticas de acesso.
-        
+        Return access statistics.
+
         Args:
-            table_name: Filtrar por tabela (opcional)
-            days: Número de dias para análise
-            
+            table_name: Optional table filter.
+            days: Number of days to analyze.
+
         Returns:
-            Estatísticas de acesso
+            Access statistics dictionary.
         """
         conn = self._get_connection()
         cursor = conn.cursor()

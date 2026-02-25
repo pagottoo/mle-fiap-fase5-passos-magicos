@@ -1,8 +1,9 @@
 """
-Módulo de monitoramento e logging
+Monitoring and logging module.
 """
-from .logger import setup_logging, log_prediction
+from .logger import setup_logging, log_prediction, get_logger
 from .metrics import MetricsCollector
+from .job_metrics import JobMetricsPusher
 from .drift import DriftDetector
 from .alerts import (
     AlertManager,
@@ -10,7 +11,6 @@ from .alerts import (
     AlertType,
     Alert,
     SlackChannel,
-    EmailChannel,
     WebhookChannel,
     ConsoleChannel,
     get_alert_manager,
@@ -20,14 +20,15 @@ from .alerts import (
 __all__ = [
     "setup_logging",
     "log_prediction",
+    "get_logger",
     "MetricsCollector",
+    "JobMetricsPusher",
     "DriftDetector",
     "AlertManager",
     "AlertSeverity",
     "AlertType",
     "Alert",
     "SlackChannel",
-    "EmailChannel",
     "WebhookChannel",
     "ConsoleChannel",
     "get_alert_manager",

@@ -1,137 +1,147 @@
 #!/usr/bin/env python
 """
-Script de demonstração do MLflow - Model Registry e Experiment Tracking
+MLflow demo script - Model Registry and Experiment Tracking
 
-Este script demonstra o fluxo completo de MLOps com MLflow:
-1. Tracking de experimentos
-2. Registro de modelos no Model Registry
-3. Promoção de modelos para produção
-4. Carregamento de modelo para inferência
+This script demonstrates a complete MLOps workflow with MLflow:
+1. Experiment tracking
+2. Model registration in Model Registry
+3. Model promotion to production
+4. Model loading for inference
 """
 import sys
 from pathlib import Path
 
-# Adicionar o diretório src ao path
+# Add project root to path.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import structlog
 
 from src.data import DataPreprocessor, FeatureEngineer
 from src.models.trainer import ModelTrainer
 from src.mlflow_tracking import ExperimentTracker, ModelRegistry
 from src.config import DATA_DIR
+from src.monitoring.logger import setup_logging
+
+setup_logging()
+logger = structlog.get_logger().bind(service="passos-magicos", component="mlflow_demo")
+
+
+def _console(message: object, level: str = "info", **kwargs) -> None:
+    log_fn = getattr(logger, level, logger.info)
+    log_fn("demo_output", message=str(message), **kwargs)
 
 
 def main():
-    print("=" * 70)
-    print("DEMONSTRAÇÃO: MLflow Model Registry e Experiment Tracking")
-    print("=" * 70)
+    _console("=" * 70)
+    _console("DEMO: MLflow Model Registry and Experiment Tracking")
+    _console("=" * 70)
     
-    # 1. Carregar e preparar dados
-    print("\n[1/7] Carregando e preparando dados...")
+    # 1. Load and prepare data.
+    _console("\n[1/7] Loading and preparing data...")
     data_path = DATA_DIR / "Bases antigas" / "PEDE_PASSOS_DATASET_FIAP.csv"
     
     if not data_path.exists():
-        print(f"   ⚠ Arquivo não encontrado: {data_path}")
-        print("   Criando dados de exemplo para demonstração...")
+        _console(f"  File not found: {data_path}")
+        _console("   Creating sample data for the demo...")
         df = create_sample_data()
     else:
         df = pd.read_csv(data_path, sep=";")
-        print(f"   ✓ Dados carregados: {len(df)} registros")
+        _console(f"    Data loaded: {len(df)} rows")
     
-    # Preprocessamento
+    # Preprocessing.
     preprocessor = DataPreprocessor()
     df = preprocessor.clean_data(df)
     df = preprocessor.handle_missing_values(df)
     
-    # Feature engineering
+    # Feature engineering.
     feature_engineer = FeatureEngineer()
     df = feature_engineer.fit_transform(df)
     X, y = feature_engineer.get_feature_matrix(df)
     
-    print(f"   ✓ Features: {X.shape[1]}, Samples: {X.shape[0]}")
-    print(f"   ✓ Target: {y.sum()} positivos ({y.mean()*100:.1f}%)")
+    _console(f"    Features: {X.shape[1]}, Samples: {X.shape[0]}")
+    _console(f"    Target: {y.sum()} positives ({y.mean()*100:.1f}%)")
     
-    # 2. Inicializar trainer com MLflow
-    print("\n[2/7] Inicializando ModelTrainer com MLflow...")
+    # 2. Initialize trainer with MLflow enabled.
+    _console("\n[2/7] Initializing ModelTrainer with MLflow...")
     trainer = ModelTrainer(
         model_type="random_forest",
         experiment_name="passos-magicos-demo",
         enable_mlflow=True
     )
-    print("   ✓ Trainer inicializado com MLflow habilitado")
+    _console("    Trainer initialized with MLflow enabled")
     
-    # 3. Iniciar uma run MLflow
-    print("\n[3/7] Iniciando run MLflow...")
+    # 3. Start an MLflow run.
+    _console("\n[3/7] Starting MLflow run...")
     run_name = f"demo-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     trainer.start_run(
         run_name=run_name,
-        description="Demonstração do fluxo MLflow completo"
+        description="Demo of the end-to-end MLflow workflow"
     )
-    print(f"   ✓ Run iniciada: {run_name}")
-    print(f"   ✓ Run ID: {trainer.run_id}")
+    _console(f"    Run started: {run_name}")
+    _console(f"    Run ID: {trainer.run_id}")
     
-    # 4. Treinar e avaliar modelo
-    print("\n[4/7] Treinando e avaliando modelo...")
+    # 4. Train and evaluate model.
+    _console("\n[4/7] Training and evaluating model...")
     
-    # Split dos dados
+    # Split data.
     X_train, X_test, y_train, y_test = trainer.split_data(X, y)
     
-    # Validação cruzada
+    # Cross validation.
     cv_results = trainer.cross_validate(X_train, y_train)
-    print(f"   ✓ CV F1-Score: {cv_results['f1']['mean']:.4f} (±{cv_results['f1']['std']:.4f})")
+    _console(f"    CV F1-Score: {cv_results['f1']['mean']:.4f} (±{cv_results['f1']['std']:.4f})")
     
-    # Treinamento
+    # Training.
     trainer.train(X_train, y_train)
-    print("   ✓ Modelo treinado")
+    _console("    Model trained")
     
-    # Avaliação
+    # Evaluation.
     metrics = trainer.evaluate(X_test, y_test)
-    print(f"   ✓ Test F1-Score: {metrics['f1_score']:.4f}")
-    print(f"   ✓ Test ROC-AUC: {metrics['roc_auc']:.4f}")
+    _console(f"    Test F1-Score: {metrics['f1_score']:.4f}")
+    _console(f"    Test ROC-AUC: {metrics['roc_auc']:.4f}")
     
-    # 5. Registrar modelo no MLflow
-    print("\n[5/7] Registrando modelo no MLflow Model Registry...")
+    # 5. Register model in MLflow Model Registry.
+    _console("\n[5/7] Registering model in MLflow Model Registry...")
     model_uri = trainer.log_model_to_mlflow(
         X_sample=X_test[:5],
         y_sample=y_test[:5],
         registered_model_name="passos-magicos-ponto-virada"
     )
-    print(f"   ✓ Modelo registrado: {model_uri}")
+    _console(f"    Model registered: {model_uri}")
     
-    # Finalizar run
+    # End run.
     trainer.end_run()
-    print("   ✓ Run finalizada")
+    _console("    Run finished")
     
-    # 6. Promover modelo para produção
-    print("\n[6/7] Promovendo modelo para produção...")
+    # 6. Promote model to production.
+    _console("\n[6/7] Promoting model to production...")
     success = trainer.promote_model_to_production(
         model_name="passos-magicos-ponto-virada"
     )
     if success:
-        print("   ✓ Modelo promovido para Production!")
+        _console("    Model promoted to Production!")
     else:
-        print("   ⚠ Falha ao promover modelo")
+        _console("  Failed to promote model")
     
-    # 7. Verificar status do Model Registry
-    print("\n[7/7] Verificando status do Model Registry...")
+    # 7. Check Model Registry status.
+    _console("\n[7/7] Checking Model Registry status...")
     registry = ModelRegistry()
     
     status = registry.get_registry_status()
-    print(f"   ✓ Total de modelos registrados: {status['total_models']}")
+    _console(f"    Total registered models: {status['total_models']}")
     
     for model in status["models"]:
-        print(f"\n   Modelo: {model['name']}")
-        print(f"   Versões: {model['total_versions']}")
+        _console(f"\n   Model: {model['name']}")
+        _console(f"   Versions: {model['total_versions']}")
         for stage, info in model["latest_versions"].items():
-            print(f"      - {stage}: v{info['version']} ({info['status']})")
+            _console(f"      - {stage}: v{info['version']} ({info['status']})")
     
-    # Demonstrar carregamento do modelo
-    print("\n" + "=" * 70)
-    print("CARREGANDO MODELO DO MLFLOW PARA INFERÊNCIA")
-    print("=" * 70)
+    # Demonstrate model loading.
+    _console("\n" + "=" * 70)
+    _console("LOADING MODEL FROM MLFLOW FOR INFERENCE")
+    _console("=" * 70)
     
     try:
         from src.models.predictor import ModelPredictor
@@ -141,11 +151,11 @@ def main():
             stage="Production"
         )
         
-        print(f"\n   ✓ Modelo carregado do MLflow!")
-        print(f"   ✓ Versão: {predictor.get_model_info()['version']}")
-        print(f"   ✓ Fonte: {predictor.loaded_from}")
+        _console("\n    Model loaded from MLflow!")
+        _console(f"    Version: {predictor.get_model_info()['version']}")
+        _console(f"    Source: {predictor.loaded_from}")
         
-        # Fazer uma predição de exemplo
+        # Build sample prediction input.
         sample = {
             "inde": 7.5, "ipv": 7.0, "ipp": 6.5, "ida": 15.0,
             "ieg": 7.2, "iaa": 7.8, "ips": 6.9, "ian": 7.1,
@@ -153,25 +163,25 @@ def main():
             "FASE": 3, "ANOS_PM": 2, "SITUACAO_2025": 1
         }
         
-        # Nota: Para predição com modelo MLflow, precisamos passar features processadas
-        print("\n   Predição de exemplo:")
-        print(f"   Input: {sample}")
+        # For MLflow-based prediction, input must contain processed features.
+        _console("\n   Sample prediction:")
+        _console(f"   Input: {sample}")
         
     except Exception as e:
-        print(f"\n   ⚠ Erro ao carregar modelo: {e}")
-        print("   (Isso pode ocorrer se o MLflow server não estiver rodando)")
+        _console(f"\n  Error loading model: {e}")
+        _console("   (This can happen if the MLflow server is not running)")
     
-    # Sumário
-    print("\n" + "=" * 70)
-    print("RESUMO - MLflow Integration")
-    print("=" * 70)
-    print(f"""
-    ✓ Experimento: passos-magicos-demo
-    ✓ Run: {run_name}
-    ✓ Modelo registrado: passos-magicos-ponto-virada
-    ✓ Stage atual: Production
+    # Summary.
+    _console("\n" + "=" * 70)
+    _console("RESUMO - MLflow Integration")
+    _console("=" * 70)
+    _console(f"""
+     Experimento: passos-magicos-demo
+     Run: {run_name}
+     Registered model: passos-magicos-ponto-virada
+     Current stage: Production
     
-    PRÓXIMOS PASSOS:
+    NEXT STEPS:
     
     1. Iniciar MLflow UI:
        mlflow ui --port 5000
@@ -181,16 +191,16 @@ def main():
        
     3. Acessar: http://localhost:5000
     
-    4. Visualizar:
-       - Experimentos e runs
-       - Métricas e parâmetros
-       - Artefatos do modelo
-       - Model Registry com versões
+    4. Explore:
+       - Experiments and runs
+       - Metrics and parameters
+       - Model artifacts
+       - Model Registry versions
     """)
 
 
 def create_sample_data() -> pd.DataFrame:
-    """Cria dados de exemplo para demonstração."""
+    """Create sample data for demo purposes."""
     np.random.seed(42)
     n_samples = 100
     

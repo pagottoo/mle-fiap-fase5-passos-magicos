@@ -1,54 +1,55 @@
 """
-API FastAPI para o modelo de Ponto de Virada
+FastAPI service for the Turning Point prediction model.
 """
 import os
+import uuid
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import time
-import structlog
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from src.models import ModelPredictor
-from src.monitoring.logger import setup_logging, log_prediction
+from src.monitoring.logger import setup_logging, log_prediction, get_logger
 from src.monitoring.metrics import MetricsCollector
 from src.feature_store import FeatureStore
 
-# Configurar logging
+# Configure logging
 setup_logging()
-logger = structlog.get_logger()
+logger = get_logger(component="api")
 
-# Inicializar métricas
+# Initialize metrics
 metrics_collector = MetricsCollector()
 
-# Criar aplicação FastAPI
+# Create FastAPI application
 app = FastAPI(
-    title="Passos Mágicos - API de Predição de Ponto de Virada",
+    title="Passos Magicos - Turning Point Prediction API",
     description="""
-    API para predição de Ponto de Virada dos alunos da Passos Mágicos.
-    
-    O **Ponto de Virada** representa o momento transformador na vida do aluno,
-    quando ele "vira a chave" e começa uma mudança real em sua trajetória educacional.
-    
+    API for predicting the student Turning Point outcome.
+
+    The **Turning Point** represents a key transformation moment in a student's journey.
+
     ## Endpoints
-    
-    - **POST /predict**: Realiza predição para um único aluno
-    - **POST /predict/batch**: Realiza predição para múltiplos alunos
-    - **GET /predict/aluno/{aluno_id}**: Predição usando Feature Store
-    - **GET /health**: Verifica status da API
-    - **GET /model/info**: Retorna informações do modelo
-    - **GET /metrics**: Retorna métricas de uso da API
-    - **GET /features/status**: Status do Feature Store
+
+    - **POST /predict**: Predict for one student
+    - **POST /predict/batch**: Predict for multiple students
+    - **GET /predict/aluno/{aluno_id}**: Predict using Feature Store
+    - **GET /health**: Check API health
+    - **GET /model/info**: Get model information
+    - **GET /metrics**: Get JSON API metrics
+    - **GET /metrics/prometheus**: Get Prometheus metrics
+    - **GET /features/status**: Get Feature Store status
     """,
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# Configurar CORS
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,18 +58,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Carregar modelo e Feature Store na inicialização
+# Load model and Feature Store on startup
 predictor = None
 feature_store = None
 
 
 def _create_predictor_from_runtime_config() -> ModelPredictor:
     """
-    Cria o predictor com base na estratégia de runtime.
+    Build the predictor using runtime strategy.
 
-    Estratégias:
-    - local (padrão): carrega de arquivo local (.joblib)
-    - mlflow: carrega do MLflow Model Registry
+    Strategies:
+    - local (default): load from local file (.joblib)
+    - mlflow: load from MLflow Model Registry
     """
     model_source = os.getenv("MODEL_SOURCE", "local").strip().lower()
     model_path_env = os.getenv("MODEL_PATH", "").strip()
@@ -98,7 +99,7 @@ def _create_predictor_from_runtime_config() -> ModelPredictor:
             if not fallback_local:
                 raise
 
-    # local (padrão) ou fallback
+    # local (default) or fallback
     if model_path is not None:
         return ModelPredictor(model_path=model_path)
     return ModelPredictor()
@@ -106,10 +107,10 @@ def _create_predictor_from_runtime_config() -> ModelPredictor:
 
 @app.on_event("startup")
 async def startup_event():
-    """Carrega o modelo e Feature Store na inicialização da API."""
+    """Load model and Feature Store during API startup."""
     global predictor, feature_store
-    
-    # Carregar modelo
+
+    # Load model
     try:
         predictor = _create_predictor_from_runtime_config()
         logger.info(
@@ -123,42 +124,47 @@ async def startup_event():
     except Exception as e:
         logger.error("model_load_error", error=str(e))
         predictor = None
+
+    metrics_collector.set_model_loaded(predictor is not None)
     
-    # Inicializar Feature Store
+    # Initialize Feature Store
     try:
         feature_store = FeatureStore()
         logger.info("feature_store_loaded", status="success")
     except Exception as e:
         logger.error("feature_store_error", error=str(e))
         feature_store = None
+
+    metrics_collector.set_feature_store_loaded(feature_store is not None)
     
     logger.info("api_started", model_loaded=predictor is not None, feature_store_loaded=feature_store is not None)
 
 
-# Schemas Pydantic
+# Pydantic schemas
 class StudentData(BaseModel):
-    """Schema para dados de entrada do aluno.
-    
-    Campos obrigatórios para predição: INDE, IAA, IEG, IPS, IDA, IPP, IPV, IAN, FASE, PEDRA, BOLSISTA
+    """Schema for student input payload.
+
+    Required fields for prediction:
+    INDE, IAA, IEG, IPS, IDA, IPP, IPV, IAN, FASE, PEDRA, BOLSISTA.
     """
-    # Campos obrigatórios para predição
-    INDE: float = Field(..., description="Índice de Desenvolvimento Educacional")
-    IAA: float = Field(..., description="Índice de Autoavaliação")
-    IEG: float = Field(..., description="Índice de Engajamento")
-    IPS: float = Field(..., description="Índice Psicossocial")
-    IDA: float = Field(..., description="Índice de Desempenho Acadêmico")
-    IPP: float = Field(..., description="Índice de Participação")
-    IPV: float = Field(..., description="Índice de Propensão à Virada")
-    IAN: float = Field(..., description="Índice de Adequação ao Nível")
-    FASE: str = Field(..., description="Fase/turma do aluno")
-    PEDRA: str = Field(..., description="Classificação do aluno (Quartzo, Ametista, etc)")
-    BOLSISTA: str = Field(..., description="Se é bolsista (Sim/Não)")
-    
-    # Campos opcionais (não usados no modelo atual)
-    IDADE_ALUNO: Optional[int] = Field(None, description="Idade do aluno")
-    ANOS_PM: Optional[int] = Field(None, description="Anos na Passos Mágicos")
-    INSTITUICAO_ENSINO_ALUNO: Optional[str] = Field(None, description="Tipo de instituição de ensino")
-    PONTO_VIRADA: Optional[str] = Field(None, description="Se atingiu ponto de virada (não usar como feature)")
+    # Required features for inference
+    INDE: float = Field(..., description="Educational Development Index")
+    IAA: float = Field(..., description="Self-Assessment Index")
+    IEG: float = Field(..., description="Engagement Index")
+    IPS: float = Field(..., description="Psychosocial Index")
+    IDA: float = Field(..., description="Academic Performance Index")
+    IPP: float = Field(..., description="Participation Index")
+    IPV: float = Field(..., description="Turning Point Propensity Index")
+    IAN: float = Field(..., description="Level Adequacy Index")
+    FASE: str = Field(..., description="Student stage/class")
+    PEDRA: str = Field(..., description="Student cluster (Quartzo, Ametista, etc.)")
+    BOLSISTA: str = Field(..., description="Scholarship status (Yes/No)")
+
+    # Optional fields (not used by the current model)
+    IDADE_ALUNO: Optional[int] = Field(None, description="Student age")
+    ANOS_PM: Optional[int] = Field(None, description="Years in Passos Magicos")
+    INSTITUICAO_ENSINO_ALUNO: Optional[str] = Field(None, description="School institution type")
+    PONTO_VIRADA: Optional[str] = Field(None, description="Observed turning point label (not used as feature)")
     
     class Config:
         json_schema_extra = {
@@ -183,7 +189,7 @@ class StudentData(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    """Schema para resposta de predição."""
+    """Schema for prediction response."""
     prediction: int
     label: str
     probability_no_turning_point: float
@@ -194,60 +200,71 @@ class PredictionResponse(BaseModel):
 
 
 class BatchPredictionRequest(BaseModel):
-    """Schema para requisição de predição em lote."""
+    """Schema for batch prediction request."""
     students: List[StudentData]
 
 
 class HealthResponse(BaseModel):
-    """Schema para resposta de health check."""
+    """Schema for health check response."""
     status: str
     model_loaded: bool
     timestamp: str
 
 
 class ModelInfoResponse(BaseModel):
-    """Schema para informações do modelo."""
+    """Schema for model metadata."""
     model_type: str
     version: str
     trained_at: str
     metrics: Dict[str, Any]
 
 
-# Middleware para logging e métricas
+# Middleware for logging and metrics
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Middleware para logar requisições e coletar métricas."""
+    """Middleware to log requests and collect metrics."""
     start_time = time.time()
-    
-    response = await call_next(request)
-    
-    duration = time.time() - start_time
-    
-    # Coletar métricas
-    metrics_collector.record_request(
-        endpoint=request.url.path,
-        method=request.method,
-        status_code=response.status_code,
-        duration=duration
-    )
-    
-    logger.info(
-        "request_processed",
-        method=request.method,
-        path=request.url.path,
-        status_code=response.status_code,
-        duration_ms=round(duration * 1000, 2)
-    )
-    
-    return response
+    trace_id = request.headers.get("x-request-id", "").strip() or uuid.uuid4().hex
+    request.state.trace_id = trace_id
+    bind_contextvars(trace_id=trace_id)
+
+    metrics_collector.request_started()
+    try:
+        response = await call_next(request)
+        duration = time.time() - start_time
+
+        route = request.scope.get("route")
+        route_path = request.url.path
+        if route is not None and hasattr(route, "path"):
+            route_path = route.path
+
+        metrics_collector.record_request(
+            endpoint=route_path,
+            method=request.method,
+            status_code=response.status_code,
+            duration=duration,
+        )
+
+        response.headers["x-request-id"] = trace_id
+        logger.info(
+            "request_processed",
+            method=request.method,
+            path=route_path,
+            status_code=response.status_code,
+            duration_ms=round(duration * 1000, 2),
+        )
+        return response
+    finally:
+        metrics_collector.request_finished()
+        clear_contextvars()
 
 
 # Endpoints
 @app.get("/", tags=["Root"])
 async def root():
-    """Endpoint raiz."""
+    """Root endpoint."""
     return {
-        "message": "Passos Mágicos - API de Predição de Ponto de Virada",
+        "message": "Passos Magicos - Turning Point Prediction API",
         "docs": "/docs",
         "health": "/health"
     }
@@ -255,7 +272,7 @@ async def root():
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
-    """Verifica o status da API e do modelo."""
+    """Check API and model health state."""
     return HealthResponse(
         status="healthy" if predictor is not None else "degraded",
         model_loaded=predictor is not None,
@@ -265,7 +282,7 @@ async def health_check():
 
 @app.get("/model/info", response_model=ModelInfoResponse, tags=["Model"])
 async def model_info():
-    """Retorna informações sobre o modelo carregado."""
+    """Return metadata for the loaded model."""
     if predictor is None:
         raise HTTPException(
             status_code=503,
@@ -284,13 +301,13 @@ async def model_info():
 @app.post("/predict", response_model=PredictionResponse, tags=["Prediction"])
 async def predict(student: StudentData):
     """
-    Realiza predição de Ponto de Virada para um aluno.
-    
-    Retorna:
-    - prediction: 0 (improvável) ou 1 (provável)
-    - label: "Ponto de Virada Provável" ou "Ponto de Virada Improvável"
-    - probability_*: Probabilidades de cada classe
-    - confidence: Confiança da predição
+    Predict Turning Point for a single student.
+
+    Returns:
+    - prediction: 0 (unlikely) or 1 (likely)
+    - label: class label from the model
+    - probability_*: class probabilities
+    - confidence: model confidence
     """
     if predictor is None:
         raise HTTPException(
@@ -299,17 +316,20 @@ async def predict(student: StudentData):
         )
     
     try:
-        # Converter para dicionário
+        # Convert payload to dictionary
         input_data = student.model_dump(exclude_none=True)
-        
-        # Fazer predição
+
+        # Run prediction
         result = predictor.predict(input_data)
-        
-        # Logar predição para monitoramento
+
+        # Log prediction for monitoring
         log_prediction(input_data, result)
-        
-        # Registrar métricas
-        metrics_collector.record_prediction(result["prediction"])
+
+        # Record metrics
+        metrics_collector.record_prediction(
+            prediction=result["prediction"],
+            confidence=result.get("confidence"),
+        )
         
         return PredictionResponse(
             prediction=result["prediction"],
@@ -329,9 +349,9 @@ async def predict(student: StudentData):
 @app.post("/predict/batch", tags=["Prediction"])
 async def predict_batch(request: BatchPredictionRequest):
     """
-    Realiza predição para múltiplos alunos.
-    
-    Retorna lista de predições, uma para cada aluno.
+    Predict for multiple students.
+
+    Returns one prediction result per student.
     """
     if predictor is None:
         raise HTTPException(
@@ -345,9 +365,12 @@ async def predict_batch(request: BatchPredictionRequest):
             input_data = student.model_dump(exclude_none=True)
             result = predictor.predict(input_data)
             
-            # Logar predição
+            # Log prediction
             log_prediction(input_data, result)
-            metrics_collector.record_prediction(result["prediction"])
+            metrics_collector.record_prediction(
+                prediction=result["prediction"],
+                confidence=result.get("confidence"),
+            )
             
             results.append({
                 **result,
@@ -363,8 +386,17 @@ async def predict_batch(request: BatchPredictionRequest):
 
 @app.get("/metrics", tags=["Monitoring"])
 async def get_metrics():
-    """Retorna métricas de uso da API."""
+    """Return API usage metrics in JSON format."""
     return metrics_collector.get_metrics()
+
+
+@app.get("/metrics/prometheus", tags=["Monitoring"])
+async def get_prometheus_metrics():
+    """Return metrics in Prometheus exposition format."""
+    return Response(
+        content=metrics_collector.get_prometheus_metrics(),
+        media_type=metrics_collector.prometheus_content_type,
+    )
 
 
 # ==================== Alert Endpoints ====================
@@ -372,12 +404,12 @@ async def get_metrics():
 @app.get("/alerts/status", tags=["Monitoring"])
 async def get_alert_status():
     """
-    Retorna status do sistema de alertas.
-    
-    Mostra:
-    - Canais configurados (Slack, Email, Webhook)
-    - Contagem de alertas por severidade
-    - Último alerta enviado
+    Return alerting system status.
+
+    Includes:
+    - configured channels (Slack/Webhook/Console)
+    - alert count by severity
+    - latest alerts
     """
     try:
         from src.monitoring.alerts import get_alert_manager
@@ -401,12 +433,12 @@ async def get_alert_status():
 @app.get("/alerts/history", tags=["Monitoring"])
 async def get_alert_history(limit: int = 50):
     """
-    Retorna histórico de alertas enviados.
-    
+    Return alert history.
+
     Args:
-        limit: Número máximo de alertas a retornar (default: 50)
-    
-    Retorna lista de alertas ordenados do mais recente para o mais antigo.
+        limit: Maximum number of alerts to return (default: 50)
+
+    Returns alerts sorted from newest to oldest.
     """
     try:
         from src.monitoring.alerts import get_alert_manager
@@ -425,27 +457,27 @@ async def get_alert_history(limit: int = 50):
 
 
 class AlertTestRequest(BaseModel):
-    """Schema para requisição de teste de alerta."""
-    channel: Optional[str] = Field(None, description="Canal específico para testar (console, slack, email, webhook)")
-    message: Optional[str] = Field("Alerta de teste via API", description="Mensagem de teste")
+    """Schema for alert test request."""
+    channel: Optional[str] = Field(None, description="Specific channel to test (console, slack, webhook)")
+    message: Optional[str] = Field("API test alert", description="Test message")
 
 
 @app.post("/alerts/test", tags=["Monitoring"])
 async def test_alert(request: AlertTestRequest):
     """
-    Envia um alerta de teste.
-    
-    Útil para:
-    - Verificar se canais estão configurados corretamente
-    - Testar conectividade com Slack, Email, etc.
-    - Validar formatação de mensagens
+    Send a test alert.
+
+    Useful to:
+    - verify channel configuration
+    - validate Slack/Webhook connectivity
+    - validate message formatting
     """
     try:
         from src.monitoring.alerts import get_alert_manager, AlertType, AlertSeverity
         
         alert_manager = get_alert_manager()
         
-        # Enviar alerta de teste
+        # Send test alert
         success = alert_manager.send_alert(
             alert_type=AlertType.CUSTOM,
             severity=AlertSeverity.INFO,
@@ -469,21 +501,21 @@ async def test_alert(request: AlertTestRequest):
 
 
 class ManualAlertRequest(BaseModel):
-    """Schema para envio manual de alerta."""
-    type: str = Field(..., description="Tipo do alerta: data_drift, prediction_drift, model_performance, api_error, system")
-    severity: str = Field("WARNING", description="Severidade: INFO, WARNING, ERROR, CRITICAL")
-    title: str = Field(..., description="Título do alerta")
-    message: str = Field(..., description="Mensagem detalhada")
-    details: Optional[Dict[str, Any]] = Field(None, description="Detalhes adicionais")
+    """Schema for manual alert payload."""
+    type: str = Field(..., description="Alert type: data_drift, prediction_drift, model_performance, api_error, system")
+    severity: str = Field("WARNING", description="Severity: INFO, WARNING, ERROR, CRITICAL")
+    title: str = Field(..., description="Alert title")
+    message: str = Field(..., description="Alert message")
+    details: Optional[Dict[str, Any]] = Field(None, description="Additional details")
 
 
 @app.post("/admin/reload-model", tags=["Admin"])
 async def reload_model(request: Request):
     """
-    Recarrega o modelo em runtime sem reiniciar o processo da API.
+    Reload model at runtime without restarting the API process.
 
-    Segurança:
-    - Se ADMIN_RELOAD_TOKEN estiver definido, exige header X-Admin-Token.
+    Security:
+    - If `ADMIN_RELOAD_TOKEN` is set, requires `X-Admin-Token` header.
     """
     global predictor
 
@@ -496,6 +528,7 @@ async def reload_model(request: Request):
     try:
         predictor = _create_predictor_from_runtime_config()
         info = predictor.get_model_info()
+        metrics_collector.set_model_loaded(True)
         return {
             "status": "reloaded",
             "model_loaded": predictor is not None,
@@ -504,6 +537,7 @@ async def reload_model(request: Request):
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
+        metrics_collector.set_model_loaded(False)
         logger.error("model_reload_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Falha ao recarregar modelo: {e}")
 
@@ -511,19 +545,19 @@ async def reload_model(request: Request):
 @app.post("/alerts/send", tags=["Monitoring"])
 async def send_manual_alert(request: ManualAlertRequest):
     """
-    Envia um alerta manualmente.
-    
-    Permite enviar alertas customizados via API, útil para:
-    - Integração com sistemas externos
-    - Alertas de processos de batch
-    - Notificações de eventos importantes
+    Send a manual alert.
+
+    Useful for:
+    - integrations with external systems
+    - batch process notifications
+    - custom operational events
     """
     try:
         from src.monitoring.alerts import get_alert_manager, AlertType, AlertSeverity
         
         alert_manager = get_alert_manager()
         
-        # Mapear tipo
+        # Map alert type
         type_map = {
             "data_drift": AlertType.DATA_DRIFT,
             "prediction_drift": AlertType.PREDICTION_DRIFT,
@@ -534,7 +568,7 @@ async def send_manual_alert(request: ManualAlertRequest):
             "custom": AlertType.CUSTOM
         }
         
-        # Mapear severidade
+        # Map severity
         severity_map = {
             "INFO": AlertSeverity.INFO,
             "WARNING": AlertSeverity.WARNING,
@@ -566,7 +600,7 @@ async def send_manual_alert(request: ManualAlertRequest):
 
 @app.get("/features", tags=["Model"])
 async def get_features():
-    """Retorna lista de features utilizadas pelo modelo."""
+    """Return the list of features used by the model."""
     if predictor is None:
         raise HTTPException(
             status_code=503,
@@ -581,13 +615,13 @@ async def get_features():
 @app.get("/features/status", tags=["Feature Store"])
 async def get_feature_store_status():
     """
-    Retorna status do Feature Store.
-    
-    Mostra:
-    - Features registradas
-    - Grupos de features
-    - Datasets no offline store
-    - Tabelas no online store
+    Return Feature Store status.
+
+    Includes:
+    - registered features
+    - feature groups
+    - offline store datasets
+    - online store tables
     """
     if feature_store is None:
         raise HTTPException(
@@ -601,13 +635,13 @@ async def get_feature_store_status():
 @app.get("/features/registry", tags=["Feature Store"])
 async def get_feature_registry():
     """
-    Lista todas as features registradas no Feature Store.
-    
-    Retorna definições de features incluindo:
-    - Nome, tipo, descrição
-    - Coluna de origem
-    - Transformação aplicada
-    - Tags para filtragem
+    List all registered features in Feature Store.
+
+    Includes:
+    - name, type and description
+    - source column
+    - transformation metadata
+    - tags
     """
     if feature_store is None:
         raise HTTPException(
@@ -633,7 +667,7 @@ async def get_feature_registry():
 
 @app.get("/features/groups", tags=["Feature Store"])
 async def get_feature_groups():
-    """Lista grupos de features disponíveis."""
+    """List available feature groups."""
     if feature_store is None:
         raise HTTPException(
             status_code=503,
@@ -657,14 +691,12 @@ async def get_feature_groups():
 @app.get("/predict/aluno/{aluno_id}", response_model=PredictionResponse, tags=["Feature Store"])
 async def predict_by_aluno_id(aluno_id: int):
     """
-    Faz predição para um aluno usando features do Feature Store.
-    
-    Este endpoint demonstra a integração Feature Store + Modelo:
-    1. Busca features do aluno no Online Store (baixa latência)
-    2. Aplica o modelo de predição
-    3. Retorna resultado
-    
-    **Vantagem**: Não precisa enviar todas as features - elas já estão armazenadas!
+    Predict for one student using Feature Store features.
+
+    This endpoint demonstrates Feature Store + Model integration:
+    1. fetches features from Online Store (low latency)
+    2. runs model inference
+    3. returns prediction result
     """
     start_time = time.time()
     
@@ -681,7 +713,7 @@ async def predict_by_aluno_id(aluno_id: int):
         )
     
     try:
-        # 1. Buscar features do Online Store
+        # 1. Fetch features from Online Store
         feature_vector = feature_store.get_feature_vector("alunos_features", aluno_id)
         
         if not feature_vector:
@@ -690,11 +722,14 @@ async def predict_by_aluno_id(aluno_id: int):
                 detail=f"Aluno {aluno_id} não encontrado no Feature Store."
             )
         
-        # 2. Fazer predição
+        # 2. Run prediction
         result = predictor.predict(feature_vector)
-        
-        # 3. Logar e registrar métricas (apenas predição - requisição já contabilizada no middleware)
-        metrics_collector.record_prediction(result["prediction"])
+
+        # 3. Log and record metrics (request metric already handled by middleware)
+        metrics_collector.record_prediction(
+            prediction=result["prediction"],
+            confidence=result.get("confidence"),
+        )
         
         log_prediction({"aluno_id": aluno_id, "source": "feature_store"}, result)
         
@@ -718,14 +753,14 @@ async def predict_by_aluno_id(aluno_id: int):
 @app.get("/predict/alunos", tags=["Feature Store"])
 async def predict_batch_by_ids(aluno_ids: str):
     """
-    Faz predição em lote para múltiplos alunos usando Feature Store.
-    
-    **Parâmetros:**
-    - aluno_ids: IDs separados por vírgula (ex: "1,2,3,4,5")
-    
-    Este é o caso de uso ideal do Feature Store:
-    - Busca features de múltiplos alunos com uma única query
-    - Evita latência de múltiplas requisições
+    Run batch prediction for multiple students using Feature Store.
+
+    Parameters:
+    - `aluno_ids`: comma-separated IDs (e.g. `"1,2,3,4,5"`)
+
+    Ideal Feature Store usage:
+    - fetches many students with one query
+    - avoids multiple request round-trips
     """
     if predictor is None or feature_store is None:
         raise HTTPException(
@@ -736,8 +771,8 @@ async def predict_batch_by_ids(aluno_ids: str):
     try:
         # Parse IDs
         ids = [int(id.strip()) for id in aluno_ids.split(",")]
-        
-        # Buscar features em batch
+
+        # Fetch features in batch
         df = feature_store.get_serving_features("alunos_features", ids)
         
         if df.empty:
@@ -746,7 +781,7 @@ async def predict_batch_by_ids(aluno_ids: str):
                 detail="Nenhum aluno encontrado no Feature Store."
             )
         
-        # Fazer predições
+        # Run predictions
         results = []
         for _, row in df.iterrows():
             feature_vector = row.to_dict()
@@ -773,14 +808,15 @@ async def predict_batch_by_ids(aluno_ids: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Handler de exceções
+# Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handler global de exceções."""
-    logger.error("unhandled_exception", error=str(exc), path=request.url.path)
+    """Handle uncaught exceptions."""
+    trace_id = getattr(request.state, "trace_id", None)
+    logger.error("unhandled_exception", error=str(exc), path=request.url.path, trace_id=trace_id)
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error", "error": str(exc)}
+        content={"detail": "Internal server error", "error": str(exc), "trace_id": trace_id}
     )
 
 

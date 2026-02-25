@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
 """
-Demonstração do Sistema de Alertas
+Alerting System Demo
 
-Este script demonstra como:
-1. Configurar AlertManager
-2. Enviar alertas via diferentes canais
-3. Integrar alertas com detecção de drift
-4. Consultar histórico de alertas
+This script demonstrates how to:
+1. Configure AlertManager
+2. Send alerts through different channels
+3. Integrate alerts with drift detection
+4. Inspect alert history
 
 Execute: python scripts/alerts_demo.py
 """
 import sys
 import os
 
-# Adicionar path do projeto
+# Add project root to path.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import structlog
+
+from src.monitoring.logger import setup_logging
+
+setup_logging()
+logger = structlog.get_logger().bind(service="passos-magicos", component="alerts_demo")
+
+
+def _console(message: object, level: str = "info", **kwargs) -> None:
+    log_fn = getattr(logger, level, logger.info)
+    log_fn("demo_output", message=str(message), **kwargs)
 
 
 def demo_basic_alerts():
-    """Demonstra envio básico de alertas."""
-    print("\n" + "="*60)
-    print("📢 DEMONSTRAÇÃO DE ALERTAS BÁSICOS")
-    print("="*60)
+    """Demonstrate basic alert sending."""
+    _console("\n" + "="*60)
+    _console("📢 BASIC ALERTS DEMO")
+    _console("="*60)
     
     from src.monitoring.alerts import (
         AlertManager,
@@ -35,69 +46,69 @@ def demo_basic_alerts():
         get_alert_manager
     )
     
-    # Criar AlertManager com canal de console
+    # Create AlertManager with a console channel.
     manager = AlertManager()
     manager.add_channel(ConsoleChannel())
     
-    print("\n1️⃣ Enviando alerta INFO...")
+    _console("\n Sending INFO alert...")
     manager.send_alert(
         alert_type=AlertType.CUSTOM,
         severity=AlertSeverity.INFO,
-        title="Sistema Iniciado",
-        message="O sistema de alertas foi inicializado com sucesso.",
+        title="System Started",
+        message="The alerting system was initialized successfully.",
         metadata={"version": "1.0.0", "environment": "demo"}
     )
     
-    print("\n2️⃣ Enviando alerta WARNING...")
+    _console("\n Sending WARNING alert...")
     manager.send_alert(
         alert_type=AlertType.DATA_DRIFT,
         severity=AlertSeverity.WARNING,
-        title="Data Drift Leve Detectado",
-        message="Pequena mudança detectada na distribuição de features.",
+        title="Mild Data Drift Detected",
+        message="A small change was detected in feature distributions.",
         metadata={
-            "features_afetadas": ["INDE", "IAA"],
+            "affected_features": ["INDE", "IAA"],
             "drift_score": 0.15
         }
     )
     
-    print("\n3️⃣ Enviando alerta ERROR...")
+    _console("\n Sending ERROR alert...")
     manager.send_alert(
         alert_type=AlertType.MODEL_PERFORMANCE,
         severity=AlertSeverity.ERROR,
-        title="Degradação de Performance",
-        message="A acurácia do modelo caiu abaixo do threshold aceitável.",
+        title="Model Performance Degradation",
+        message="Model accuracy dropped below the acceptable threshold.",
         metadata={
-            "accuracy_atual": 0.72,
-            "accuracy_esperada": 0.85,
-            "queda": "15%"
+            "current_accuracy": 0.72,
+            "expected_accuracy": 0.85,
+            "drop": "15%"
         }
     )
     
-    print("\n4️⃣ Enviando alerta CRITICAL...")
+    _console("\n Sending CRITICAL alert...")
     manager.send_alert(
         alert_type=AlertType.API_ERROR,
         severity=AlertSeverity.CRITICAL,
-        title="API Indisponível",
-        message="A API de produção não está respondendo!",
+        title="API Unavailable",
+        message="The production API is not responding!",
         metadata={
             "endpoint": "/predict",
             "status_code": 503,
-            "tentativas": 5
+            "attempts": 5
         }
     )
     
-    # Mostrar histórico
-    print("\n📜 Histórico de Alertas:")
-    print("-" * 40)
+    # Show alert history.
+    _console("\n Alert History:")
+    _console("-" * 40)
     for alert in manager.get_history():
-        print(f"  [{alert['severity']}] {alert['title']}")
+        _console(f"  [{alert['severity']}] {alert['title']}")
 
 
 def demo_convenience_functions():
-    """Demonstra funções de conveniência do AlertManager."""
-    print("\n" + "="*60)
-    print(" MÉTODOS DE CONVENIÊNCIA DO ALERTMANAGER")
-    print("="*60)
+    """Demonstrate AlertManager convenience methods."""
+    _console("\n" + "="*60)
+    _console(" ALERTMANAGER CONVENIENCE METHODS")
+    _console("="*60)
     
     from src.monitoring.alerts import (
         get_alert_manager,
@@ -105,55 +116,55 @@ def demo_convenience_functions():
         ConsoleChannel
     )
     
-    # Configurar manager global
+    # Configure global manager.
     manager = get_alert_manager()
     manager.add_channel(ConsoleChannel())
     
-    print("\n1️⃣ Usando manager.alert_data_drift()...")
+    _console("\n Using manager.alert_data_drift()...")
     manager.alert_data_drift(
         feature="INDE",
         drift_score=0.35,
         threshold=0.20
     )
     
-    print("\n2️⃣ Usando manager.alert_prediction_drift()...")
+    _console("\n Using manager.alert_prediction_drift()...")
     manager.alert_prediction_drift(
         drift_detected=True,
         current_distribution={"0": 0.35, "1": 0.65}
     )
     
-    print("\n3️⃣ Usando manager.alert_model_performance()...")
+    _console("\n Using manager.alert_model_performance()...")
     manager.alert_model_performance(
         metric_name="F1-Score",
         current_value=0.78,
         expected_value=0.85
     )
     
-    print("\n4️⃣ Usando send_alert() standalone...")
+    _console("\n Using standalone send_alert()...")
     from src.monitoring.alerts import AlertType, AlertSeverity
     send_alert(
         alert_type=AlertType.CUSTOM,
         severity=AlertSeverity.INFO,
-        title="Novo Modelo Registrado",
-        message="Modelo v2.0.0 foi registrado no MLflow",
+        title="New Model Registered",
+        message="Model v2.0.0 was registered in MLflow",
         metadata={"model_version": "2.0.0", "stage": "Staging"}
     )
 
 
 def demo_drift_integration():
-    """Demonstra integração com DriftDetector."""
-    print("\n" + "="*60)
-    print(" INTEGRAÇÃO COM DRIFT DETECTOR")
-    print("="*60)
+    """Demonstrate integration with DriftDetector."""
+    _console("\n" + "="*60)
+    _console(" DRIFT DETECTOR INTEGRATION")
+    _console("="*60)
     
     from src.monitoring.alerts import ConsoleChannel, get_alert_manager
     from src.monitoring.drift import DriftDetector
     
-    # Configurar alertas
+    # Configure alerts.
     manager = get_alert_manager()
     manager.add_channel(ConsoleChannel())
     
-    # Criar dados de referência
+    # Create reference data.
     np.random.seed(42)
     reference_data = pd.DataFrame({
         'INDE': np.random.normal(7.0, 1.5, 100),
@@ -162,10 +173,10 @@ def demo_drift_integration():
         'IPS': np.random.normal(6.0, 1.5, 100)
     })
     
-    # Criar detector com alertas habilitados
+    # Create detector with alerts enabled.
     detector = DriftDetector(reference_data=reference_data, enable_alerts=True)
     
-    print("\n1️⃣ Testando com dados similares (sem drift)...")
+    _console("\n Testing with similar data (no drift)...")
     similar_data = pd.DataFrame({
         'INDE': np.random.normal(7.0, 1.5, 50),
         'IAA': np.random.normal(6.5, 1.2, 50),
@@ -173,36 +184,36 @@ def demo_drift_integration():
         'IPS': np.random.normal(6.0, 1.5, 50)
     })
     result = detector.detect_data_drift(similar_data)
-    print(f"   Drift detectado: {result['drift_detected']}")
+    _console(f"   Drift detected: {result['drift_detected']}")
     
-    print("\n2️⃣ Testando com dados diferentes (com drift)...")
+    _console("\n Testing with different data (with drift)...")
     drifted_data = pd.DataFrame({
-        'INDE': np.random.normal(9.0, 1.5, 50),  # Média muito diferente
-        'IAA': np.random.normal(4.0, 1.2, 50),  # Média muito diferente
-        'IEG': np.random.normal(5.0, 1.0, 50),  # Média diferente
-        'IPS': np.random.normal(8.0, 1.5, 50)   # Média diferente
+        'INDE': np.random.normal(9.0, 1.5, 50),  # Strongly shifted mean
+        'IAA': np.random.normal(4.0, 1.2, 50),  # Strongly shifted mean
+        'IEG': np.random.normal(5.0, 1.0, 50),  # Shifted mean
+        'IPS': np.random.normal(8.0, 1.5, 50)   # Shifted mean
     })
     result = detector.detect_data_drift(drifted_data)
-    print(f"   Drift detectado: {result['drift_detected']}")
-    print(f"   Features com drift: {result['features_with_drift']}")
+    _console(f"   Drift detected: {result['drift_detected']}")
+    _console(f"   Features with drift: {result['features_with_drift']}")
     
-    print("\n3️⃣ Testando prediction drift...")
-    # Distribuição normal
+    _console("\n Testing prediction drift...")
+    # Balanced distribution.
     normal_predictions = [0, 1, 0, 1, 0, 1, 0, 0, 1, 1] * 10
     result = detector.detect_prediction_drift(normal_predictions)
-    print(f"   Prediction drift (normal): {result['drift_detected']}")
+    _console(f"   Prediction drift (normal): {result['drift_detected']}")
     
-    # Distribuição anormal (muito mais classe 1)
+    # Biased distribution (many more class 1 samples).
     biased_predictions = [1, 1, 1, 1, 1, 1, 1, 1, 0, 1] * 10
     result = detector.detect_prediction_drift(biased_predictions)
-    print(f"   Prediction drift (biased): {result['drift_detected']}")
+    _console(f"   Prediction drift (biased): {result['drift_detected']}")
 
 
 def demo_alert_status():
-    """Demonstra consulta de status do AlertManager."""
-    print("\n" + "="*60)
-    print(" STATUS DO SISTEMA DE ALERTAS")
-    print("="*60)
+    """Demonstrate AlertManager status inspection."""
+    _console("\n" + "="*60)
+    _console(" ALERT SYSTEM STATUS")
+    _console("="*60)
     
     from src.monitoring.alerts import get_alert_manager, ConsoleChannel
     import json
@@ -212,21 +223,21 @@ def demo_alert_status():
     
     status = manager.get_status()
     
-    print("\n Status atual:")
-    print(json.dumps(status, indent=2, default=str))
+    _console("\n Current status:")
+    _console(json.dumps(status, indent=2, default=str))
     
-    print("\n📜 Histórico completo:")
+    _console("\n Full history:")
     for i, alert in enumerate(manager.get_history(), 1):
-        print(f"\n  {i}. [{alert['severity']}] {alert['title']}")
-        print(f"     Tipo: {alert['alert_type']}")
-        print(f"     Hora: {alert['timestamp']}")
+        _console(f"\n  {i}. [{alert['severity']}] {alert['title']}")
+        _console(f"     Type: {alert['alert_type']}")
+        _console(f"     Time: {alert['timestamp']}")
 
 
 def demo_slack_format():
-    """Demonstra formatação de alerta para Slack."""
-    print("\n" + "="*60)
-    print("💬 FORMATAÇÃO SLACK")
-    print("="*60)
+    """Demonstrate Slack alert formatting."""
+    _console("\n" + "="*60)
+    _console("SLACK FORMATTING")
+    _console("="*60)
     
     from src.monitoring.alerts import Alert, AlertType, AlertSeverity
     import json
@@ -234,11 +245,11 @@ def demo_slack_format():
     alert = Alert(
         alert_type=AlertType.DATA_DRIFT,
         severity=AlertSeverity.WARNING,
-        title="Data Drift Detectado",
-        message="Mudança significativa detectada nas features de entrada.",
+        title="Data Drift Detected",
+        message="Significant change detected in input feature distributions.",
         source="drift_detector",
         metadata={
-            "features_afetadas": ["INDE", "IAA", "IEG"],
+            "affected_features": ["INDE", "IAA", "IEG"],
             "drift_score": 0.35,
             "timestamp": datetime.now().isoformat()
         }
@@ -246,23 +257,16 @@ def demo_slack_format():
     
     slack_blocks = alert.to_slack_blocks()
     
-    print("\n Slack Block Kit JSON:")
-    print(json.dumps(slack_blocks, indent=2))
-    
-    print("\n📧 Email HTML Preview:")
-    html = alert.to_email_html()
-    # Mostrar apenas primeiras linhas
-    lines = html.split('\n')[:30]
-    print('\n'.join(lines))
-    print("... (truncado)")
+    _console("\n Slack Block Kit JSON:")
+    _console(json.dumps(slack_blocks, indent=2))
 
 
 def main():
-    """Executa todas as demonstrações."""
-    print("\n" + "🔔"*30)
-    print("   DEMONSTRAÇÃO DO SISTEMA DE ALERTAS")
-    print("   Passos Mágicos MLOps")
-    print("🔔"*30)
+    """Run all demo sections."""
+    _console("\n" + "*"*30)
+    _console("   ALERTING SYSTEM DEMO")
+    _console("   Passos Mágicos MLOps")
+    _console("*"*30)
     
     try:
         demo_basic_alerts()
@@ -271,36 +275,12 @@ def main():
         demo_alert_status()
         demo_slack_format()
         
-        print("\n" + "="*60)
-        print(" DEMONSTRAÇÃO CONCLUÍDA COM SUCESSO!")
-        print("="*60)
-        
-        print("""
-📝 Próximos passos para configurar alertas em produção:
-
-1. Configure variáveis de ambiente:
-   export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
-   export SMTP_HOST="smtp.gmail.com"
-   export SMTP_USER="seu-email@gmail.com"
-   export SMTP_PASSWORD="app-password"
-   export ALERT_EMAIL_TO="equipe@exemplo.com"
-
-2. Os alertas serão enviados automaticamente quando:
-   - Drift de dados for detectado
-   - Drift de predições for detectado
-   - Erros críticos ocorrerem na API
-
-3. Para testar manualmente via API:
-   curl -X POST http://localhost:8000/alerts/test
-
-4. Para enviar alerta via API:
-   curl -X POST http://localhost:8000/alerts/send \\
-     -H "Content-Type: application/json" \\
-     -d '{"type": "system", "severity": "INFO", "title": "Teste", "message": "Mensagem de teste"}'
-""")
+        _console("\n" + "="*60)
+        _console(" DEMO COMPLETED SUCCESSFULLY!")
+        _console("="*60)
         
     except Exception as e:
-        print(f"\n❌ Erro na demonstração: {e}")
+        _console(f"\n Demo error: {e}")
         import traceback
         traceback.print_exc()
         return 1

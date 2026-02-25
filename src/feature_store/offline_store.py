@@ -1,5 +1,5 @@
 """
-Offline Store - Armazenamento para treinamento (batch)
+Offline Store - batch storage for training datasets.
 """
 import pandas as pd
 import numpy as np
@@ -14,18 +14,18 @@ logger = structlog.get_logger()
 
 class OfflineStore:
     """
-    Store offline para features de treinamento.
-    
-    Usa arquivos Parquet para armazenamento eficiente de dados históricos.
-    Ideal para batch processing e treinamento de modelos.
+    Offline store for training features.
+
+    Uses Parquet files for efficient historical storage.
+    Suitable for batch processing and model training.
     """
     
     def __init__(self, store_path: Optional[Path] = None):
         """
-        Inicializa o offline store.
-        
+        Initialize offline store.
+
         Args:
-            store_path: Diretório para armazenamento dos dados
+            store_path: Directory where datasets are stored.
         """
         self.store_path = store_path or Path(__file__).parent.parent.parent / "feature_store" / "offline"
         self.store_path.mkdir(parents=True, exist_ok=True)
@@ -34,14 +34,14 @@ class OfflineStore:
         self._metadata = self._load_metadata()
     
     def _load_metadata(self) -> Dict[str, Any]:
-        """Carrega metadados do store."""
+        """Load metadata file."""
         if self.metadata_path.exists():
             with open(self.metadata_path, "r") as f:
                 return json.load(f)
         return {"datasets": {}, "created_at": datetime.now().isoformat()}
     
     def _save_metadata(self) -> None:
-        """Salva metadados do store."""
+        """Persist metadata file."""
         self._metadata["updated_at"] = datetime.now().isoformat()
         with open(self.metadata_path, "w") as f:
             json.dump(self._metadata, f, indent=2)
@@ -55,29 +55,29 @@ class OfflineStore:
         version: Optional[str] = None
     ) -> str:
         """
-        Ingere dados no offline store.
-        
+        Ingest data into offline store.
+
         Args:
-            df: DataFrame com features
-            dataset_name: Nome do dataset
-            entity_column: Coluna de identificação da entidade
-            timestamp_column: Coluna de timestamp (opcional)
-            version: Versão do dataset (auto-gerada se não fornecida)
-            
+            df: Feature DataFrame.
+            dataset_name: Dataset name.
+            entity_column: Entity identifier column.
+            timestamp_column: Optional timestamp column.
+            version: Dataset version (auto-generated when omitted).
+
         Returns:
-            Caminho do arquivo salvo
+            Saved file path.
         """
         version = version or datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Criar diretório do dataset
+        # Create dataset directory
         dataset_dir = self.store_path / dataset_name
         dataset_dir.mkdir(parents=True, exist_ok=True)
         
-        # Salvar em Parquet
+        # Persist parquet file
         file_path = dataset_dir / f"{dataset_name}_{version}.parquet"
         df.to_parquet(file_path, index=False)
         
-        # Atualizar metadados
+        # Update metadata
         if dataset_name not in self._metadata["datasets"]:
             self._metadata["datasets"][dataset_name] = {
                 "versions": [],
@@ -115,39 +115,39 @@ class OfflineStore:
         filters: Optional[Dict[str, Any]] = None
     ) -> pd.DataFrame:
         """
-        Obtém dataset do offline store.
-        
+        Retrieve dataset from offline store.
+
         Args:
-            dataset_name: Nome do dataset
-            version: Versão específica (última se não fornecida)
-            columns: Colunas a selecionar (todas se não fornecidas)
-            filters: Filtros a aplicar
-            
+            dataset_name: Dataset name.
+            version: Specific version (latest by default).
+            columns: Optional selected columns.
+            filters: Optional filter mapping.
+
         Returns:
-            DataFrame com os dados
+            DataFrame with dataset rows.
         """
         if dataset_name not in self._metadata["datasets"]:
-            raise ValueError(f"Dataset '{dataset_name}' não encontrado")
+            raise ValueError(f"Dataset '{dataset_name}' not found")
         
         dataset_meta = self._metadata["datasets"][dataset_name]
         
-        # Selecionar versão
+        # Select version
         if version:
             version_meta = next(
                 (v for v in dataset_meta["versions"] if v["version"] == version),
                 None
             )
             if not version_meta:
-                raise ValueError(f"Versão '{version}' não encontrada")
+                raise ValueError(f"Version '{version}' not found")
         else:
-            # Última versão
+            # Latest version
             version_meta = dataset_meta["versions"][-1]
         
-        # Carregar dados
+        # Load dataset
         file_path = Path(version_meta["file_path"])
         df = pd.read_parquet(file_path, columns=columns)
         
-        # Aplicar filtros
+        # Apply filters
         if filters:
             for col, value in filters.items():
                 if col in df.columns:
@@ -173,16 +173,16 @@ class OfflineStore:
         version: Optional[str] = None
     ) -> tuple:
         """
-        Obtém features e target para treinamento.
-        
+        Return features and target for training.
+
         Args:
-            dataset_name: Nome do dataset
-            feature_columns: Colunas de features
-            target_column: Coluna target
-            version: Versão do dataset
-            
+            dataset_name: Dataset name.
+            feature_columns: Feature columns.
+            target_column: Target column.
+            version: Dataset version.
+
         Returns:
-            Tupla (X, y) com features e target
+            Tuple `(X, y)` with features and target.
         """
         columns = feature_columns + [target_column]
         df = self.get_dataset(dataset_name, version=version, columns=columns)
@@ -193,29 +193,29 @@ class OfflineStore:
         return X, y
     
     def list_datasets(self) -> List[str]:
-        """Lista datasets disponíveis."""
+        """List available datasets."""
         return list(self._metadata["datasets"].keys())
     
     def list_versions(self, dataset_name: str) -> List[Dict[str, Any]]:
-        """Lista versões de um dataset."""
+        """List versions of a dataset."""
         if dataset_name not in self._metadata["datasets"]:
             return []
         return self._metadata["datasets"][dataset_name]["versions"]
     
     def get_dataset_info(self, dataset_name: str) -> Optional[Dict[str, Any]]:
-        """Obtém informações de um dataset."""
+        """Get metadata for one dataset."""
         return self._metadata["datasets"].get(dataset_name)
     
     def delete_version(self, dataset_name: str, version: str) -> bool:
         """
-        Remove uma versão de dataset.
-        
+        Delete one dataset version.
+
         Args:
-            dataset_name: Nome do dataset
-            version: Versão a remover
-            
+            dataset_name: Dataset name.
+            version: Version to delete.
+
         Returns:
-            True se removido com sucesso
+            True when deleted successfully.
         """
         if dataset_name not in self._metadata["datasets"]:
             return False
@@ -226,12 +226,12 @@ class OfflineStore:
         if not version_meta:
             return False
         
-        # Remover arquivo
+        # Remove parquet file
         file_path = Path(version_meta["file_path"])
         if file_path.exists():
             file_path.unlink()
         
-        # Atualizar metadados
+        # Update metadata
         self._metadata["datasets"][dataset_name]["versions"] = [
             v for v in versions if v["version"] != version
         ]
@@ -243,14 +243,14 @@ class OfflineStore:
     
     def compute_statistics(self, dataset_name: str, version: Optional[str] = None) -> Dict[str, Any]:
         """
-        Computa estatísticas de um dataset.
-        
+        Compute descriptive statistics for a dataset.
+
         Args:
-            dataset_name: Nome do dataset
-            version: Versão do dataset
-            
+            dataset_name: Dataset name.
+            version: Dataset version.
+
         Returns:
-            Dicionário com estatísticas
+            Statistics dictionary.
         """
         df = self.get_dataset(dataset_name, version=version)
         

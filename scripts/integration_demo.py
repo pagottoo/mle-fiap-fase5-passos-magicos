@@ -1,24 +1,35 @@
 #!/usr/bin/env python
 """
-Script de demonstração da integração Feature Store + API
+Feature Store + API integration demo script
 
-Este script demonstra o fluxo completo:
-1. Treinar modelo (que popula o Feature Store)
-2. Testar endpoints da API usando Feature Store
+This script demonstrates the end-to-end flow:
+1. Train a model (which populates the Feature Store)
+2. Test API endpoints using Feature Store data
 """
 import sys
 from pathlib import Path
 
-# Adicionar o diretório raiz ao path
+# Add project root to path.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
 import json
 from time import sleep
+import structlog
+
+from src.monitoring.logger import setup_logging
+
+setup_logging()
+logger = structlog.get_logger().bind(service="passos-magicos", component="integration_demo")
+
+
+def _console(message: object, level: str = "info", **kwargs) -> None:
+    log_fn = getattr(logger, level, logger.info)
+    log_fn("demo_output", message=str(message), **kwargs)
 
 
 def wait_for_api(base_url: str, max_retries: int = 10) -> bool:
-    """Aguarda a API estar disponível."""
+    """Wait until the API becomes available."""
     for i in range(max_retries):
         try:
             response = requests.get(f"{base_url}/health")
@@ -26,107 +37,107 @@ def wait_for_api(base_url: str, max_retries: int = 10) -> bool:
                 return True
         except requests.ConnectionError:
             pass
-        print(f"   Aguardando API... ({i+1}/{max_retries})")
+        _console(f"   Waiting for API... ({i+1}/{max_retries})")
         sleep(1)
     return False
 
 
 def demo_feature_store_endpoints(base_url: str):
-    """Demonstra os endpoints do Feature Store."""
+    """Demonstrate Feature Store endpoints."""
     
-    print("\n" + "=" * 60)
-    print("TESTANDO ENDPOINTS DO FEATURE STORE")
-    print("=" * 60)
+    _console("\n" + "=" * 60)
+    _console("TESTING FEATURE STORE ENDPOINTS")
+    _console("=" * 60)
     
-    # 1. Status do Feature Store
-    print("\n[1/4] GET /features/status")
+    # 1. Feature Store status.
+    _console("\n[1/4] GET /features/status")
     response = requests.get(f"{base_url}/features/status")
     if response.status_code == 200:
         status = response.json()
-        print(f"   ✓ Features registradas: {status['registry']['features']}")
-        print(f"   ✓ Grupos: {status['registry']['groups']}")
-        print(f"   ✓ Datasets offline: {status['offline_store']['datasets']}")
-        print(f"   ✓ Tabelas online: {status['online_store']['tables']}")
+        _console(f"   ✓ Registered features: {status['registry']['features']}")
+        _console(f"   ✓ Groups: {status['registry']['groups']}")
+        _console(f"   ✓ Offline datasets: {status['offline_store']['datasets']}")
+        _console(f"   ✓ Online tables: {status['online_store']['tables']}")
     else:
-        print(f"   ✗ Erro: {response.status_code} - {response.text}")
+        _console(f"   ✗ Error: {response.status_code} - {response.text}")
     
-    # 2. Registry de Features
-    print("\n[2/4] GET /features/registry")
+    # 2. Feature registry.
+    _console("\n[2/4] GET /features/registry")
     response = requests.get(f"{base_url}/features/registry")
     if response.status_code == 200:
         registry = response.json()
-        print(f"   ✓ Total de features: {registry['count']}")
+        _console(f"   ✓ Total features: {registry['count']}")
         for feat in registry['features'][:3]:
-            print(f"      - {feat['name']}: {feat['description']}")
+            _console(f"      - {feat['name']}: {feat['description']}")
         if registry['count'] > 3:
-            print(f"      ... e mais {registry['count'] - 3} features")
+            _console(f"      ... and {registry['count'] - 3} more features")
     else:
-        print(f"   ✗ Erro: {response.status_code} - {response.text}")
+        _console(f"   ✗ Error: {response.status_code} - {response.text}")
     
-    # 3. Grupos de Features
-    print("\n[3/4] GET /features/groups")
+    # 3. Feature groups.
+    _console("\n[3/4] GET /features/groups")
     response = requests.get(f"{base_url}/features/groups")
     if response.status_code == 200:
         groups = response.json()
-        print(f"   ✓ Total de grupos: {groups['count']}")
+        _console(f"   ✓ Total groups: {groups['count']}")
         for group in groups['groups']:
-            print(f"      - {group['name']}: {group['description']}")
-            print(f"        Features: {', '.join(group['features'][:3])}...")
+            _console(f"      - {group['name']}: {group['description']}")
+            _console(f"        Features: {', '.join(group['features'][:3])}...")
     else:
-        print(f"   ✗ Erro: {response.status_code} - {response.text}")
+        _console(f"   ✗ Error: {response.status_code} - {response.text}")
     
-    # 4. Predição por aluno_id
-    print("\n[4/4] GET /predict/aluno/{aluno_id}")
+    # 4. Prediction by aluno_id.
+    _console("\n[4/4] GET /predict/aluno/{aluno_id}")
     response = requests.get(f"{base_url}/predict/aluno/1")
     if response.status_code == 200:
         prediction = response.json()
-        print(f"   ✓ Predição para aluno 1:")
-        print(f"      - Label: {prediction['label']}")
-        print(f"      - Confiança: {prediction['confidence']:.2%}")
-        print(f"      - Probabilidade Ponto de Virada: {prediction['probability_turning_point']:.2%}")
+        _console(f"   ✓ Prediction for student 1:")
+        _console(f"      - Label: {prediction['label']}")
+        _console(f"      - Confidence: {prediction['confidence']:.2%}")
+        _console(f"      - Turning-point probability: {prediction['probability_turning_point']:.2%}")
     elif response.status_code == 404:
-        print("   ⚠ Aluno 1 não encontrado no Feature Store")
-        print("   (Execute o script de treinamento para popular o Feature Store)")
+        _console("   ⚠ Student 1 not found in Feature Store")
+        _console("   (Run the training script to populate the Feature Store)")
     else:
-        print(f"   ✗ Erro: {response.status_code} - {response.text}")
+        _console(f"   ✗ Error: {response.status_code} - {response.text}")
 
 
 def demo_batch_prediction(base_url: str):
-    """Demonstra predição em lote via Feature Store."""
+    """Demonstrate batch prediction using Feature Store."""
     
-    print("\n" + "=" * 60)
-    print("TESTANDO PREDIÇÃO EM LOTE")
-    print("=" * 60)
+    _console("\n" + "=" * 60)
+    _console("TESTING BATCH PREDICTION")
+    _console("=" * 60)
     
-    # Predição em lote
-    print("\n[1/1] GET /predict/alunos?aluno_ids=1,2,3,4,5")
+    # Batch prediction.
+    _console("\n[1/1] GET /predict/alunos?aluno_ids=1,2,3,4,5")
     response = requests.get(f"{base_url}/predict/alunos?aluno_ids=1,2,3,4,5")
     if response.status_code == 200:
         batch = response.json()
-        print(f"   ✓ Predições realizadas: {batch['count']}")
-        print(f"   ✓ Fonte: {batch['source']}")
+        _console(f"   ✓ Predictions returned: {batch['count']}")
+        _console(f"   ✓ Source: {batch['source']}")
         for pred in batch['predictions'][:3]:
-            print(f"      - Aluno {pred.get('aluno_id', '?')}: {pred['label']} ({pred['confidence']:.2%})")
+            _console(f"      - Student {pred.get('aluno_id', '?')}: {pred['label']} ({pred['confidence']:.2%})")
         if batch['count'] > 3:
-            print(f"      ... e mais {batch['count'] - 3} predições")
+            _console(f"      ... and {batch['count'] - 3} more predictions")
     elif response.status_code == 404:
-        print("   ⚠ Nenhum aluno encontrado no Feature Store")
-        print("   (Execute o script de treinamento para popular o Feature Store)")
+        _console("   ⚠ No students found in Feature Store")
+        _console("   (Run the training script to populate the Feature Store)")
     else:
-        print(f"   ✗ Erro: {response.status_code} - {response.text}")
+        _console(f"   ✗ Error: {response.status_code} - {response.text}")
 
 
 def demo_comparison(base_url: str):
-    """Compara endpoint tradicional vs Feature Store."""
+    """Compare traditional endpoint vs Feature Store endpoint."""
     
-    print("\n" + "=" * 60)
-    print("COMPARAÇÃO: ENDPOINT TRADICIONAL vs FEATURE STORE")
-    print("=" * 60)
+    _console("\n" + "=" * 60)
+    _console("COMPARISON: TRADITIONAL ENDPOINT vs FEATURE STORE")
+    _console("=" * 60)
     
-    # Endpoint tradicional - precisa enviar todas as features
-    print("\n[Tradicional] POST /predict")
-    print("   → Precisa enviar TODAS as features na requisição:")
-    print("   → inde, ipv, ipp, ida, ieg, iaa, ips, ian, ipd, iap, NOTA_MAT, FASE, ANOS_PM, SITUACAO_2025")
+    # Traditional endpoint: all features must be provided.
+    _console("\n[Traditional] POST /predict")
+    _console("   -> You must send ALL features in the request:")
+    _console("   → inde, ipv, ipp, ida, ieg, iaa, ips, ian, ipd, iap, NOTA_MAT, FASE, ANOS_PM, SITUACAO_2025")
     
     sample_data = {
         "inde": 7.5,
@@ -147,60 +158,60 @@ def demo_comparison(base_url: str):
     
     response = requests.post(f"{base_url}/predict", json=sample_data)
     if response.status_code == 200:
-        print(f"   ✓ Predição realizada")
+        _console("   ✓ Prediction successful")
     else:
-        print(f"   ✗ Erro: {response.status_code}")
+        _console(f"   ✗ Error: {response.status_code}")
     
-    # Endpoint Feature Store - só precisa do ID
-    print("\n[Feature Store] GET /predict/aluno/1")
-    print("   → Só precisa enviar o ID do aluno!")
-    print("   → Features são buscadas automaticamente do Feature Store")
+    # Feature Store endpoint: only student ID is required.
+    _console("\n[Feature Store] GET /predict/aluno/1")
+    _console("   -> Only the student ID is required.")
+    _console("   -> Features are fetched automatically from Feature Store.")
     
     response = requests.get(f"{base_url}/predict/aluno/1")
     if response.status_code == 200:
-        print(f"   ✓ Predição realizada")
+        _console("   ✓ Prediction successful")
     elif response.status_code == 404:
-        print("   ⚠ Aluno não encontrado (Feature Store vazio)")
+        _console("   ⚠ Student not found (empty Feature Store)")
     
-    print("\n" + "=" * 60)
-    print("VANTAGENS DO FEATURE STORE:")
-    print("=" * 60)
-    print("""
-    1. CONSISTÊNCIA: Mesmas features no treino e inferência
-    2. SIMPLICIDADE: Cliente só envia o ID
-    3. VELOCIDADE: Features pré-computadas e cacheadas
-    4. GOVERNANÇA: Versionamento e metadados centralizados
-    5. REUSO: Features compartilhadas entre modelos
+    _console("\n" + "=" * 60)
+    _console("FEATURE STORE ADVANTAGES:")
+    _console("=" * 60)
+    _console("""
+    1. CONSISTENCY: Same features for training and inference
+    2. SIMPLICITY: Client sends only the ID
+    3. SPEED: Pre-computed and cached features
+    4. GOVERNANCE: Centralized versioning and metadata
+    5. REUSE: Shared features across models
     """)
 
 
 def main():
     base_url = "http://localhost:8000"
     
-    print("=" * 60)
-    print("DEMONSTRAÇÃO: INTEGRAÇÃO FEATURE STORE + API")
-    print("=" * 60)
+    _console("=" * 60)
+    _console("DEMO: FEATURE STORE + API INTEGRATION")
+    _console("=" * 60)
     
-    print("\nVerificando se a API está disponível...")
+    _console("\nChecking API availability...")
     
     if not wait_for_api(base_url):
-        print("\n⚠ API não está disponível!")
-        print("Para iniciar a API, execute:")
-        print("   uvicorn api.main:app --reload")
-        print("\nOu via Docker:")
-        print("   docker-compose up")
+        _console("\n⚠ API is not available!")
+        _console("To start the API, run:")
+        _console("   uvicorn api.main:app --reload")
+        _console("\nOr via Docker:")
+        _console("   docker-compose up")
         return
     
-    print("✓ API disponível!")
+    _console("✓ API is available!")
     
-    # Executar demonstrações
+    # Run demos.
     demo_feature_store_endpoints(base_url)
     demo_batch_prediction(base_url)
     demo_comparison(base_url)
     
-    print("\n" + "=" * 60)
-    print("DEMONSTRAÇÃO CONCLUÍDA!")
-    print("=" * 60)
+    _console("\n" + "=" * 60)
+    _console("DEMO COMPLETED!")
+    _console("=" * 60)
 
 
 if __name__ == "__main__":

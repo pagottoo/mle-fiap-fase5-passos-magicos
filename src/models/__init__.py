@@ -1,5 +1,5 @@
 """
-Módulo de modelos de machine learning
+Machine learning models module.
 """
 from .trainer import ModelTrainer
 from .predictor import ModelPredictor

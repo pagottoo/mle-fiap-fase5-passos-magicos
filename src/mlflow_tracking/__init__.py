@@ -1,9 +1,9 @@
 """
 MLflow Tracking Module
 
-Integração com MLflow para:
-- Experiment Tracking: registro de métricas, parâmetros e artefatos
-- Model Registry: versionamento e promoção de modelos
+MLflow integration for:
+- Experiment Tracking: metrics, parameters, and artifact logging
+- Model Registry: model versioning and promotion
 """
 from .experiment_tracker import ExperimentTracker
 from .model_registry import ModelRegistry

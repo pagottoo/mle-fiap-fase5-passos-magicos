@@ -1,11 +1,11 @@
 """
 Experiment Tracker - MLflow Integration
 
-Responsável por rastrear experimentos de ML:
-- Parâmetros de treinamento
-- Métricas de avaliação
-- Artefatos (modelo, gráficos, datasets)
-- Metadados do ambiente
+Responsible for tracking ML experiments:
+- Training parameters
+- Evaluation metrics
+- Artifacts (model, plots, datasets)
+- Environment metadata
 """
 import os
 import json
@@ -22,14 +22,14 @@ logger = structlog.get_logger()
 
 class ExperimentTracker:
     """
-    Gerencia tracking de experimentos com MLflow.
+    Manage experiment tracking with MLflow.
     
-    Exemplo de uso:
+    Example:
         tracker = ExperimentTracker(experiment_name="passos-magicos")
         
         with tracker.start_run(run_name="rf-v1"):
             tracker.log_params({"n_estimators": 100})
-            # ... treinar modelo ...
+            # ... train model ...
             tracker.log_metrics({"f1_score": 0.85})
             tracker.log_model(model, "random_forest")
     """
@@ -41,21 +41,21 @@ class ExperimentTracker:
         artifact_location: Optional[str] = None
     ):
         """
-        Inicializa o tracker.
+        Initialize the tracker.
         
         Args:
-            experiment_name: Nome do experimento MLflow
-            tracking_uri: URI do MLflow server (None = local ./mlruns)
-            artifact_location: Onde armazenar artefatos
+            experiment_name: MLflow experiment name
+            tracking_uri: MLflow server URI (None = local ./mlruns)
+            artifact_location: Artifact storage location
         """
         self.experiment_name = experiment_name
         self.tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI", "./mlruns")
         self.artifact_location = artifact_location
         
-        # Configurar MLflow
+        # Configure MLflow.
         mlflow.set_tracking_uri(self.tracking_uri)
         
-        # Criar ou obter experimento
+        # Create or fetch experiment.
         self.experiment = self._get_or_create_experiment()
         mlflow.set_experiment(self.experiment_name)
         
@@ -70,7 +70,7 @@ class ExperimentTracker:
         )
     
     def _get_or_create_experiment(self) -> mlflow.entities.Experiment:
-        """Obtém experimento existente ou cria novo."""
+        """Get an existing experiment or create a new one."""
         experiment = mlflow.get_experiment_by_name(self.experiment_name)
         
         if experiment is None:
@@ -90,10 +90,10 @@ class ExperimentTracker:
         description: Optional[str] = None
     ):
         """
-        Inicia uma nova run de experimento.
+        Start a new experiment run.
         
-        Pode ser usado como context manager:
-            with tracker.start_run("minha-run"):
+        Can be used as a context manager:
+            with tracker.start_run("my-run"):
                 ...
         """
         default_tags = {
@@ -123,16 +123,16 @@ class ExperimentTracker:
         return self
     
     def __enter__(self):
-        """Suporte a context manager."""
+        """Support context-manager usage."""
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Finaliza run ao sair do context."""
+        """Close run when leaving context."""
         self.end_run()
         return False
     
     def end_run(self, status: str = "FINISHED"):
-        """Finaliza a run atual."""
+        """End the current run."""
         if self.active_run:
             mlflow.end_run(status=status)
             logger.info("run_ended", run_id=self.active_run.info.run_id, status=status)
@@ -140,12 +140,12 @@ class ExperimentTracker:
     
     def log_params(self, params: Dict[str, Any]) -> None:
         """
-        Registra parâmetros de treinamento.
+        Log training parameters.
         
         Args:
-            params: Dicionário de parâmetros (ex: {"n_estimators": 100})
+            params: Parameter dictionary (example: {"n_estimators": 100})
         """
-        # MLflow aceita apenas strings, números e booleanos
+        # MLflow accepts only strings, numbers, and booleans.
         clean_params = {}
         for k, v in params.items():
             if isinstance(v, (str, int, float, bool)):
@@ -158,52 +158,52 @@ class ExperimentTracker:
     
     def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None) -> None:
         """
-        Registra métricas de avaliação.
+        Log evaluation metrics.
         
         Args:
-            metrics: Dicionário de métricas (ex: {"f1_score": 0.85})
-            step: Step/época opcional para métricas temporais
+            metrics: Metrics dictionary (example: {"f1_score": 0.85})
+            step: Optional step/epoch for temporal metrics
         """
         mlflow.log_metrics(metrics, step=step)
         logger.debug("metrics_logged", count=len(metrics), step=step)
     
     def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
-        """Registra uma única métrica."""
+        """Log a single metric."""
         mlflow.log_metric(key, value, step=step)
     
     def log_artifact(self, local_path: str, artifact_path: Optional[str] = None) -> None:
         """
-        Registra um arquivo como artefato.
+        Log a local file as an artifact.
         
         Args:
-            local_path: Caminho local do arquivo
-            artifact_path: Subdiretório no artifact store
+            local_path: Local file path
+            artifact_path: Subdirectory in artifact storage
         """
         mlflow.log_artifact(local_path, artifact_path)
         logger.debug("artifact_logged", path=local_path)
     
     def log_artifacts(self, local_dir: str, artifact_path: Optional[str] = None) -> None:
-        """Registra todos os arquivos de um diretório."""
+        """Log all files from a directory."""
         mlflow.log_artifacts(local_dir, artifact_path)
         logger.debug("artifacts_logged", dir=local_dir)
     
     def log_dict(self, dictionary: Dict, artifact_file: str) -> None:
         """
-        Salva um dicionário como JSON no artifact store.
+        Save a dictionary as JSON in artifact storage.
         
         Args:
-            dictionary: Dicionário a salvar
-            artifact_file: Nome do arquivo (ex: "config.json")
+            dictionary: Dictionary to store
+            artifact_file: File name (example: "config.json")
         """
         mlflow.log_dict(dictionary, artifact_file)
     
     def log_figure(self, figure, artifact_file: str) -> None:
         """
-        Salva uma figura matplotlib/plotly.
+        Save a matplotlib/plotly figure.
         
         Args:
-            figure: Objeto figure
-            artifact_file: Nome do arquivo (ex: "confusion_matrix.png")
+            figure: Figure object
+            artifact_file: File name (example: "confusion_matrix.png")
         """
         mlflow.log_figure(figure, artifact_file)
     
@@ -217,20 +217,20 @@ class ExperimentTracker:
         pip_requirements: Optional[List[str]] = None
     ) -> mlflow.models.model.ModelInfo:
         """
-        Registra modelo sklearn no MLflow.
+        Log an sklearn model in MLflow.
         
         Args:
-            model: Modelo treinado (sklearn)
-            artifact_path: Nome do artefato (ex: "model")
-            registered_model_name: Se fornecido, registra no Model Registry
-            signature: Assinatura do modelo (input/output schema)
-            input_example: Exemplo de input para inferência
-            pip_requirements: Dependências Python
+            model: Trained sklearn model
+            artifact_path: Artifact name (example: "model")
+            registered_model_name: If provided, register in Model Registry
+            signature: Model signature (input/output schema)
+            input_example: Example input for inference
+            pip_requirements: Python dependencies
             
         Returns:
-            ModelInfo com URI e metadados
+            ModelInfo with URI and metadata
         """
-        # Inferir requirements se não fornecido
+        # Infer requirements if not provided.
         if pip_requirements is None:
             pip_requirements = [
                 "scikit-learn>=1.3.0",
@@ -264,21 +264,21 @@ class ExperimentTracker:
         registered_model_name: Optional[str] = None
     ) -> mlflow.models.model.ModelInfo:
         """
-        Registra modelo sklearn com assinatura inferida automaticamente.
+        Log an sklearn model with automatically inferred signature.
         
         Args:
-            model: Modelo sklearn treinado
-            X_sample: Amostra de features (para inferir schema)
-            y_sample: Amostra de labels (para inferir schema)
-            artifact_path: Nome do artefato
-            registered_model_name: Nome para Model Registry
+            model: Trained sklearn model
+            X_sample: Feature sample (used to infer schema)
+            y_sample: Label sample (used to infer schema)
+            artifact_path: Artifact name
+            registered_model_name: Model Registry name
         """
         from mlflow.models.signature import infer_signature
         
-        # Fazer predição para inferir output schema
+        # Predict to infer output schema.
         predictions = model.predict(X_sample)
         
-        # Inferir assinatura
+        # Infer signature.
         signature = infer_signature(X_sample, predictions)
         
         return self.log_model(
@@ -286,7 +286,7 @@ class ExperimentTracker:
             artifact_path=artifact_path,
             registered_model_name=registered_model_name,
             signature=signature,
-            input_example=X_sample[:1]  # Primeiro exemplo
+            input_example=X_sample[:1]  # First example
         )
     
     def log_training_dataset(
@@ -296,33 +296,33 @@ class ExperimentTracker:
         targets: Optional[str] = None
     ) -> None:
         """
-        Registra dataset de treinamento.
+        Log training dataset metadata.
         
         Args:
-            df: DataFrame com dados de treino
-            name: Nome do dataset
-            targets: Nome da coluna target
+            df: DataFrame with training data
+            name: Dataset name
+            targets: Target column name
         """
         dataset = mlflow.data.from_pandas(df, name=name, targets=targets)
         mlflow.log_input(dataset, context="training")
         logger.debug("dataset_logged", name=name, rows=len(df))
     
     def set_tag(self, key: str, value: str) -> None:
-        """Define uma tag na run atual."""
+        """Set a tag on the current run."""
         mlflow.set_tag(key, value)
     
     def set_tags(self, tags: Dict[str, str]) -> None:
-        """Define múltiplas tags."""
+        """Set multiple tags."""
         mlflow.set_tags(tags)
     
     def get_run_id(self) -> Optional[str]:
-        """Retorna ID da run atual."""
+        """Return current run ID."""
         if self.active_run:
             return self.active_run.info.run_id
         return None
     
     def get_artifact_uri(self) -> Optional[str]:
-        """Retorna URI dos artefatos da run atual."""
+        """Return current run artifact URI."""
         if self.active_run:
             return self.active_run.info.artifact_uri
         return None
@@ -333,11 +333,11 @@ class ExperimentTracker:
         order_by: Optional[List[str]] = None
     ) -> List[mlflow.entities.Run]:
         """
-        Lista runs do experimento.
+        List experiment runs.
         
         Args:
-            max_results: Número máximo de resultados
-            order_by: Ordenação (ex: ["metrics.f1_score DESC"])
+            max_results: Maximum number of results
+            order_by: Ordering clauses (example: ["metrics.f1_score DESC"])
         """
         if order_by is None:
             order_by = ["start_time DESC"]
@@ -352,11 +352,11 @@ class ExperimentTracker:
     
     def get_best_run(self, metric: str = "f1_score", ascending: bool = False) -> Optional[mlflow.entities.Run]:
         """
-        Retorna a melhor run baseada em uma métrica.
+        Return the best run according to a metric.
         
         Args:
-            metric: Nome da métrica
-            ascending: True se menor é melhor
+            metric: Metric name
+            ascending: True if lower is better
         """
         order = "ASC" if ascending else "DESC"
         runs = self.list_runs(
@@ -368,10 +368,10 @@ class ExperimentTracker:
     
     def compare_runs(self, run_ids: List[str]) -> Dict[str, Dict]:
         """
-        Compara múltiplas runs.
+        Compare multiple runs.
         
         Returns:
-            Dicionário com métricas de cada run
+            Dictionary with metrics for each run
         """
         comparison = {}
         

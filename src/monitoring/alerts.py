@@ -1,27 +1,23 @@
 """
-Alert System - Notificações para eventos de MLOps
+Alert System - notifications for MLOps events.
 
-Suporta múltiplos canais:
+Supports multiple channels:
 - Slack (webhook)
-- Email (SMTP)
-- Webhook genérico
-- Console (para desenvolvimento)
+- Generic webhook
+- Console (development)
 
-Eventos monitorados:
-- Data drift detectado
-- Prediction drift detectado
-- Modelo promovido
-- Treinamento concluído
-- Erros críticos
+Monitored events:
+- Data drift detected
+- Prediction drift detected
+- Model promoted
+- Training completed
+- Critical errors
 """
 import os
 import json
-import smtplib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from enum import Enum
 from typing import Any, Dict, List, Optional
 import urllib.request
@@ -33,7 +29,7 @@ logger = structlog.get_logger()
 
 
 class AlertSeverity(Enum):
-    """Níveis de severidade dos alertas."""
+    """Alert severity levels."""
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -41,7 +37,7 @@ class AlertSeverity(Enum):
 
 
 class AlertType(Enum):
-    """Tipos de alertas do sistema."""
+    """Supported alert types."""
     DATA_DRIFT = "data_drift"
     PREDICTION_DRIFT = "prediction_drift"
     MODEL_PERFORMANCE = "model_performance"
@@ -55,7 +51,7 @@ class AlertType(Enum):
 
 @dataclass
 class Alert:
-    """Representa um alerta do sistema."""
+    """Represents one alert event."""
     alert_type: AlertType
     severity: AlertSeverity
     title: str
@@ -65,7 +61,7 @@ class Alert:
     source: str = "passos-magicos"
     
     def to_dict(self) -> Dict[str, Any]:
-        """Converte alerta para dicionário."""
+        """Convert alert to dictionary."""
         return {
             "alert_type": self.alert_type.value,
             "severity": self.severity.value,
@@ -77,7 +73,7 @@ class Alert:
         }
     
     def to_slack_blocks(self) -> List[Dict]:
-        """Formata alerta para Slack Block Kit."""
+        """Format alert payload for Slack Block Kit."""
         severity_emoji = {
             AlertSeverity.INFO: "ℹ️",
             AlertSeverity.WARNING: "[WARN]",
@@ -114,10 +110,10 @@ class Alert:
             }
         ]
         
-        # Adicionar metadata se existir
+        # Attach metadata section if available
         if self.metadata:
             fields = []
-            for key, value in list(self.metadata.items())[:10]:  # Limite de 10 campos
+            for key, value in list(self.metadata.items())[:10]:  # Slack limit: 10 fields
                 fields.append({
                     "type": "mrkdwn",
                     "text": f"*{key}:* {value}"
@@ -132,90 +128,24 @@ class Alert:
         blocks.append({"type": "divider"})
         
         return blocks
-    
-    def to_email_html(self) -> str:
-        """Formata alerta para email HTML."""
-        severity_color = {
-            AlertSeverity.INFO: "#17a2b8",
-            AlertSeverity.WARNING: "#ffc107",
-            AlertSeverity.ERROR: "#dc3545",
-            AlertSeverity.CRITICAL: "#721c24"
-        }
-        
-        color = severity_color.get(self.severity, "#6c757d")
-        
-        metadata_html = ""
-        if self.metadata:
-            metadata_items = "".join([
-                f"<tr><td><strong>{k}</strong></td><td>{v}</td></tr>"
-                for k, v in self.metadata.items()
-            ])
-            metadata_html = f"""
-            <h3>Details</h3>
-            <table border="1" cellpadding="5" style="border-collapse: collapse;">
-                {metadata_items}
-            </table>
-            """
-        
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                .alert-box {{ 
-                    border-left: 4px solid {color}; 
-                    padding: 15px; 
-                    background-color: #f8f9fa;
-                    margin-bottom: 20px;
-                }}
-                .severity {{ 
-                    display: inline-block;
-                    padding: 3px 10px;
-                    background-color: {color};
-                    color: white;
-                    border-radius: 3px;
-                    font-size: 12px;
-                }}
-                table {{ width: 100%; margin-top: 10px; }}
-                th, td {{ text-align: left; padding: 8px; }}
-            </style>
-        </head>
-        <body>
-            <h2>{self.title}</h2>
-            <div class="alert-box">
-                <span class="severity">{self.severity.value.upper()}</span>
-                <p>{self.message}</p>
-            </div>
-            <p><strong>Type:</strong> {self.alert_type.value}</p>
-            <p><strong>Time:</strong> {self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p><strong>Source:</strong> {self.source}</p>
-            {metadata_html}
-            <hr>
-            <p style="color: #6c757d; font-size: 12px;">
-                This alert was sent by Passos Mágicos MLOps System
-            </p>
-        </body>
-        </html>
-        """
 
 
 class AlertChannel(ABC):
-    """Interface base para canais de alerta."""
+    """Base interface for alert channels."""
     
     @abstractmethod
     def send(self, alert: Alert) -> bool:
-        """Envia um alerta pelo canal."""
+        """Send alert using this channel."""
         pass
     
     @abstractmethod
     def is_configured(self) -> bool:
-        """Verifica se o canal está configurado."""
+        """Return whether this channel is configured."""
         pass
 
 
 class SlackChannel(AlertChannel):
-    """Canal de alertas via Slack Webhook."""
+    """Slack webhook alert channel."""
     
     def __init__(self, webhook_url: Optional[str] = None):
         self.webhook_url = webhook_url or os.getenv("SLACK_WEBHOOK_URL")
@@ -257,71 +187,8 @@ class SlackChannel(AlertChannel):
             return False
 
 
-class EmailChannel(AlertChannel):
-    """Canal de alertas via Email SMTP."""
-    
-    def __init__(
-        self,
-        smtp_host: Optional[str] = None,
-        smtp_port: Optional[int] = None,
-        smtp_user: Optional[str] = None,
-        smtp_password: Optional[str] = None,
-        from_email: Optional[str] = None,
-        to_emails: Optional[List[str]] = None
-    ):
-        self.smtp_host = smtp_host or os.getenv("SMTP_HOST", "smtp.gmail.com")
-        self.smtp_port = smtp_port or int(os.getenv("SMTP_PORT", "587"))
-        self.smtp_user = smtp_user or os.getenv("SMTP_USER")
-        self.smtp_password = smtp_password or os.getenv("SMTP_PASSWORD")
-        self.from_email = from_email or os.getenv("ALERT_FROM_EMAIL")
-        
-        to_env = os.getenv("ALERT_TO_EMAILS", "")
-        self.to_emails = to_emails or [e.strip() for e in to_env.split(",") if e.strip()]
-    
-    def is_configured(self) -> bool:
-        return all([
-            self.smtp_host,
-            self.smtp_user,
-            self.smtp_password,
-            self.from_email,
-            self.to_emails
-        ])
-    
-    def send(self, alert: Alert) -> bool:
-        if not self.is_configured():
-            logger.warning("email_not_configured")
-            return False
-        
-        try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = f"[{alert.severity.value.upper()}] {alert.title}"
-            msg['From'] = self.from_email
-            msg['To'] = ", ".join(self.to_emails)
-            
-            # Versão texto simples
-            text_content = f"{alert.title}\n\n{alert.message}\n\nType: {alert.alert_type.value}\nSeverity: {alert.severity.value}"
-            
-            # Versão HTML
-            html_content = alert.to_email_html()
-            
-            msg.attach(MIMEText(text_content, 'plain'))
-            msg.attach(MIMEText(html_content, 'html'))
-            
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.from_email, self.to_emails, msg.as_string())
-            
-            logger.info("email_alert_sent", alert_type=alert.alert_type.value, to=self.to_emails)
-            return True
-            
-        except Exception as e:
-            logger.error("email_alert_error", error=str(e))
-            return False
-
-
 class WebhookChannel(AlertChannel):
-    """Canal de alertas via Webhook genérico."""
+    """Generic webhook alert channel."""
     
     def __init__(self, webhook_url: Optional[str] = None, headers: Optional[Dict] = None):
         self.webhook_url = webhook_url or os.getenv("ALERT_WEBHOOK_URL")
@@ -357,64 +224,48 @@ class WebhookChannel(AlertChannel):
 
 
 class ConsoleChannel(AlertChannel):
-    """Canal de alertas para console (desenvolvimento)."""
+    """Console alert channel (development)."""
     
     def is_configured(self) -> bool:
         return True
     
     def send(self, alert: Alert) -> bool:
-        severity_icon = {
-            AlertSeverity.INFO: "ℹ️",
-            AlertSeverity.WARNING: "[WARN]",
-            AlertSeverity.ERROR: "[DRIFT]",
-            AlertSeverity.CRITICAL: "🚨"
-        }
-        
-        icon = severity_icon.get(alert.severity, "📢")
-        
-        print(f"\n{'='*60}")
-        print(f"{icon} ALERT: {alert.title}")
-        print(f"{'='*60}")
-        print(f"Type: {alert.alert_type.value}")
-        print(f"Severity: {alert.severity.value}")
-        print(f"Time: {alert.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"\n{alert.message}")
-        
-        if alert.metadata:
-            print(f"\nMetadata:")
-            for key, value in alert.metadata.items():
-                print(f"  - {key}: {value}")
-        
-        print(f"{'='*60}\n")
-        
-        logger.info("console_alert", alert_type=alert.alert_type.value, title=alert.title)
+        logger.info(
+            "console_alert",
+            alert_type=alert.alert_type.value,
+            severity=alert.severity.value,
+            title=alert.title,
+            message=alert.message,
+            timestamp=alert.timestamp.isoformat(),
+            metadata=alert.metadata or {},
+            source=alert.source,
+        )
         return True
 
 
 class AlertManager:
     """
-    Gerenciador central de alertas.
-    
-    Exemplo de uso:
+    Central alert manager.
+
+    Usage example:
         manager = AlertManager()
         manager.add_channel(SlackChannel())
-        manager.add_channel(EmailChannel())
         
         manager.send_alert(
             alert_type=AlertType.DATA_DRIFT,
             severity=AlertSeverity.WARNING,
-            title="Data Drift Detectado",
-            message="Feature 'inde' apresentou drift significativo",
+            title="Data Drift Detected",
+            message="Feature 'inde' exceeded drift threshold",
             metadata={"feature": "inde", "drift_score": 0.15}
         )
     """
     
     def __init__(self, auto_configure: bool = True):
         """
-        Inicializa o AlertManager.
-        
+        Initialize AlertManager.
+
         Args:
-            auto_configure: Se True, configura canais automaticamente via env vars
+            auto_configure: If True, auto-configure channels from env vars.
         """
         self.channels: List[AlertChannel] = []
         self.alert_history: List[Alert] = []
@@ -426,8 +277,8 @@ class AlertManager:
         logger.info("alert_manager_initialized", channels=len(self.channels))
     
     def _auto_configure_channels(self):
-        """Configura canais automaticamente baseado em variáveis de ambiente."""
-        # Sempre adicionar console em desenvolvimento
+        """Auto-configure channels based on environment variables."""
+        # Always add console channel in development
         if os.getenv("ENVIRONMENT", "development") == "development":
             self.add_channel(ConsoleChannel())
         
@@ -435,16 +286,12 @@ class AlertManager:
         if os.getenv("SLACK_WEBHOOK_URL"):
             self.add_channel(SlackChannel())
         
-        # Email
-        if os.getenv("SMTP_USER") and os.getenv("SMTP_PASSWORD"):
-            self.add_channel(EmailChannel())
-        
-        # Webhook genérico
+        # Generic webhook
         if os.getenv("ALERT_WEBHOOK_URL"):
             self.add_channel(WebhookChannel())
     
     def add_channel(self, channel: AlertChannel) -> None:
-        """Adiciona um canal de alertas."""
+        """Add one alert channel."""
         if channel.is_configured():
             self.channels.append(channel)
             logger.info("alert_channel_added", channel=channel.__class__.__name__)
@@ -452,7 +299,7 @@ class AlertManager:
             logger.warning("alert_channel_not_configured", channel=channel.__class__.__name__)
     
     def remove_channel(self, channel_type: type) -> None:
-        """Remove canais de um tipo específico."""
+        """Remove channels by type."""
         self.channels = [c for c in self.channels if not isinstance(c, channel_type)]
     
     def send_alert(
@@ -464,10 +311,10 @@ class AlertManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, bool]:
         """
-        Envia alerta para todos os canais configurados.
-        
+        Send alert to all configured channels.
+
         Returns:
-            Dicionário com resultado por canal
+            Delivery result by channel name.
         """
         alert = Alert(
             alert_type=alert_type,
@@ -477,12 +324,12 @@ class AlertManager:
             metadata=metadata or {}
         )
         
-        # Armazenar no histórico
+        # Persist in in-memory history
         self.alert_history.append(alert)
         if len(self.alert_history) > self.max_history:
             self.alert_history = self.alert_history[-self.max_history:]
         
-        # Enviar para todos os canais
+        # Dispatch to all channels
         results = {}
         for channel in self.channels:
             channel_name = channel.__class__.__name__
@@ -502,7 +349,7 @@ class AlertManager:
         
         return results
     
-    # Métodos de conveniência para tipos específicos de alertas
+    # Convenience helpers for common alert categories
     
     def alert_data_drift(
         self,
@@ -511,12 +358,12 @@ class AlertManager:
         threshold: float,
         severity: AlertSeverity = AlertSeverity.WARNING
     ) -> Dict[str, bool]:
-        """Alerta de data drift."""
+        """Send data drift alert."""
         return self.send_alert(
             alert_type=AlertType.DATA_DRIFT,
             severity=severity,
-            title=f"Data Drift Detectado: {feature}",
-            message=f"A feature '{feature}' apresentou drift significativo. Score: {drift_score:.4f} (threshold: {threshold})",
+            title=f"Data Drift Detected: {feature}",
+            message=f"Feature '{feature}' exceeded drift threshold. Score: {drift_score:.4f} (threshold: {threshold})",
             metadata={
                 "feature": feature,
                 "drift_score": round(drift_score, 4),
@@ -531,12 +378,12 @@ class AlertManager:
         current_distribution: Dict[str, float],
         severity: AlertSeverity = AlertSeverity.WARNING
     ) -> Dict[str, bool]:
-        """Alerta de prediction drift."""
+        """Send prediction drift alert."""
         return self.send_alert(
             alert_type=AlertType.PREDICTION_DRIFT,
             severity=severity,
-            title="Prediction Drift Detectado",
-            message="A distribuição das predições mudou significativamente em relação à referência.",
+            title="Prediction Drift Detected",
+            message="Prediction distribution changed significantly from baseline.",
             metadata={
                 "drift_detected": drift_detected,
                 **{f"class_{k}": f"{v:.2%}" for k, v in current_distribution.items()}
@@ -550,12 +397,12 @@ class AlertManager:
         expected_value: float,
         severity: AlertSeverity = AlertSeverity.WARNING
     ) -> Dict[str, bool]:
-        """Alerta de degradação de performance do modelo."""
+        """Send model performance degradation alert."""
         return self.send_alert(
             alert_type=AlertType.MODEL_PERFORMANCE,
             severity=severity,
-            title=f"Performance Degradada: {metric_name}",
-            message=f"A métrica '{metric_name}' caiu abaixo do esperado. Atual: {current_value:.4f}, Esperado: {expected_value:.4f}",
+            title=f"Performance Degradation: {metric_name}",
+            message=f"Metric '{metric_name}' dropped below expectation. Current: {current_value:.4f}, Expected: {expected_value:.4f}",
             metadata={
                 "metric": metric_name,
                 "current_value": round(current_value, 4),
@@ -571,12 +418,12 @@ class AlertManager:
         stage: str,
         metrics: Optional[Dict[str, float]] = None
     ) -> Dict[str, bool]:
-        """Alerta de modelo promovido."""
+        """Send model promotion alert."""
         return self.send_alert(
             alert_type=AlertType.MODEL_PROMOTED,
             severity=AlertSeverity.INFO,
-            title=f"Modelo Promovido: {model_name}",
-            message=f"O modelo '{model_name}' versão {version} foi promovido para {stage}.",
+            title=f"Model Promoted: {model_name}",
+            message=f"Model '{model_name}' version {version} was promoted to {stage}.",
             metadata={
                 "model_name": model_name,
                 "version": version,
@@ -591,12 +438,12 @@ class AlertManager:
         metrics: Dict[str, float],
         duration_seconds: float
     ) -> Dict[str, bool]:
-        """Alerta de treinamento concluído."""
+        """Send training completed alert."""
         return self.send_alert(
             alert_type=AlertType.TRAINING_COMPLETE,
             severity=AlertSeverity.INFO,
-            title=f"Treinamento Concluído: {model_name}",
-            message=f"O treinamento do modelo '{model_name}' foi concluído com sucesso em {duration_seconds:.1f}s.",
+            title=f"Training Completed: {model_name}",
+            message=f"Training for model '{model_name}' completed successfully in {duration_seconds:.1f}s.",
             metadata={
                 "model_name": model_name,
                 "duration_seconds": round(duration_seconds, 1),
@@ -610,15 +457,15 @@ class AlertManager:
         error: str,
         severity: AlertSeverity = AlertSeverity.ERROR
     ) -> Dict[str, bool]:
-        """Alerta de falha no treinamento."""
+        """Send training failure alert."""
         return self.send_alert(
             alert_type=AlertType.TRAINING_FAILED,
             severity=severity,
-            title=f"Treinamento Falhou: {model_name}",
-            message=f"O treinamento do modelo '{model_name}' falhou com erro.",
+            title=f"Training Failed: {model_name}",
+            message=f"Training for model '{model_name}' failed.",
             metadata={
                 "model_name": model_name,
-                "error": error[:500]  # Limitar tamanho do erro
+                "error": error[:500]  # Limit error length
             }
         )
     
@@ -629,12 +476,12 @@ class AlertManager:
         status_code: Optional[int] = None,
         severity: AlertSeverity = AlertSeverity.ERROR
     ) -> Dict[str, bool]:
-        """Alerta de erro na API."""
+        """Send API error alert."""
         return self.send_alert(
             alert_type=AlertType.API_ERROR,
             severity=severity,
-            title=f"Erro na API: {endpoint}",
-            message=f"Erro no endpoint '{endpoint}': {error}",
+            title=f"API Error: {endpoint}",
+            message=f"Error on endpoint '{endpoint}': {error}",
             metadata={
                 "endpoint": endpoint,
                 "error": error[:500],
@@ -648,7 +495,7 @@ class AlertManager:
         severity: Optional[AlertSeverity] = None,
         limit: int = 100
     ) -> List[Dict]:
-        """Retorna histórico de alertas filtrado."""
+        """Return filtered alert history."""
         alerts = self.alert_history
         
         if alert_type:
@@ -660,7 +507,7 @@ class AlertManager:
         return [a.to_dict() for a in alerts[-limit:]]
     
     def get_status(self) -> Dict[str, Any]:
-        """Retorna status do sistema de alertas."""
+        """Return current alert system status."""
         return {
             "channels": [
                 {
@@ -676,12 +523,12 @@ class AlertManager:
         }
 
 
-# Singleton global para uso em toda a aplicação
+# Global singleton used across the application
 _alert_manager: Optional[AlertManager] = None
 
 
 def get_alert_manager() -> AlertManager:
-    """Retorna instância singleton do AlertManager."""
+    """Return AlertManager singleton instance."""
     global _alert_manager
     if _alert_manager is None:
         _alert_manager = AlertManager()
@@ -695,5 +542,5 @@ def send_alert(
     message: str,
     metadata: Optional[Dict[str, Any]] = None
 ) -> Dict[str, bool]:
-    """Função de conveniência para enviar alertas."""
+    """Convenience function to send alerts."""
     return get_alert_manager().send_alert(alert_type, severity, title, message, metadata)

@@ -1,5 +1,5 @@
 """
-Módulo de processamento de dados
+Data processing module.
 """
 from .preprocessing import DataPreprocessor
 from .feature_engineering import FeatureEngineer

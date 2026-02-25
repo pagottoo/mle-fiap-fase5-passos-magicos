@@ -1,5 +1,5 @@
 """
-Feature Store para centralização e gestão de features
+Feature Store for centralized feature management.
 """
 from .store import FeatureStore
 from .registry import FeatureRegistry

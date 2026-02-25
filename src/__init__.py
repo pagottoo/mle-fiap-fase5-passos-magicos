@@ -1,6 +1,6 @@
 """
-Passos Mágicos - MLOps Project
-Modelo preditivo de Ponto de Virada
+Passos Magicos - MLOps Project.
+Turning Point predictive model.
 """
 
 __version__ = "1.0.0"

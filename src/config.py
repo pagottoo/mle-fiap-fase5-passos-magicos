@@ -1,20 +1,20 @@
 """
-Configurações centralizadas do projeto
+Centralized project configuration.
 """
 import os
 from pathlib import Path
 
-# Diretórios base
+# Base directories
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "dados"
 MODELS_DIR = BASE_DIR / "models"
 LOGS_DIR = BASE_DIR / "logs"
 
-# Criar diretórios se não existirem
+# Create runtime directories if missing
 MODELS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
-# Configurações do modelo
+# Model configuration
 MODEL_CONFIG = {
     "model_name": "ponto_virada_model",
     "model_version": "1.0.0",
@@ -23,22 +23,22 @@ MODEL_CONFIG = {
     "cv_folds": 5,
 }
 
-# Features para o modelo
+# Model target
 TARGET_COLUMN = "ponto_virada_pred"
 
-# Colunas numéricas importantes (índices de avaliação)
+# Main numeric features (evaluation indexes)
 NUMERIC_FEATURES = [
-    "INDE",  # Índice de Desenvolvimento Educacional
-    "IAA",   # Índice de Autoavaliação
-    "IEG",   # Índice de Engajamento
-    "IPS",   # Índice Psicossocial
-    "IDA",   # Índice de Desempenho Acadêmico
-    "IPP",   # Índice de Ponto de Virada
-    "IPV",   # Índice de Propensão à Virada
-    "IAN",   # Índice de Adequação ao Nível
+    "INDE",  # Educational Development Index
+    "IAA",   # Self-Assessment Index
+    "IEG",   # Engagement Index
+    "IPS",   # Psychosocial Index
+    "IDA",   # Academic Performance Index
+    "IPP",   # Participation Index
+    "IPV",   # Turning Point Propensity Index
+    "IAN",   # Level Adequacy Index
 ]
 
-# Colunas categóricas
+# Categorical columns
 CATEGORICAL_FEATURES = [
     "INSTITUICAO_ENSINO_ALUNO",
     "FASE",
@@ -46,21 +46,21 @@ CATEGORICAL_FEATURES = [
     "PONTO_VIRADA",
 ]
 
-# Configurações da API
+# API configuration
 API_CONFIG = {
     "host": os.getenv("API_HOST", "0.0.0.0"),
     "port": int(os.getenv("API_PORT", 8000)),
     "debug": os.getenv("API_DEBUG", "false").lower() == "true",
 }
 
-# Configurações de logging
+# Logging configuration
 LOG_CONFIG = {
     "level": os.getenv("LOG_LEVEL", "INFO"),
     "format": "json",
 }
 
-# Configurações de monitoramento
+# Monitoring configuration
 MONITORING_CONFIG = {
     "drift_threshold": 0.1,
-    "performance_window": 1000,  # Número de predições para calcular métricas
+    "performance_window": 1000,  # Number of predictions used for metrics
 }

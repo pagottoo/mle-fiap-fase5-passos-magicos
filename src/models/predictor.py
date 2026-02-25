@@ -1,5 +1,5 @@
 """
-Módulo de predição do modelo
+Model prediction module.
 """
 import os
 import joblib
@@ -13,7 +13,7 @@ from ..config import MODELS_DIR, MODEL_CONFIG
 
 logger = structlog.get_logger()
 
-# Flag para habilitar MLflow
+# Feature flag for MLflow support
 MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
 
 try:
@@ -25,15 +25,15 @@ try:
         MLFLOW_AVAILABLE = False
 except ImportError:
     MLFLOW_AVAILABLE = False
-    logger.warning("mlflow_not_available_predictor", message="MLflow não instalado")
+    logger.warning("mlflow_not_available_predictor", message="MLflow is not installed")
 
 
 class ModelPredictor:
     """
-    Classe responsável por fazer predições com o modelo treinado.
-    
-    Suporta carregamento de:
-    - Arquivo local (.joblib)
+    Prediction interface for trained models.
+
+    Supports loading from:
+    - Local file (.joblib)
     - MLflow Model Registry (models:/name/stage)
     """
     
@@ -44,12 +44,12 @@ class ModelPredictor:
         mlflow_stage: Optional[str] = "Production"
     ):
         """
-        Inicializa o preditor.
-        
+        Initialize predictor.
+
         Args:
-            model_path: Caminho para o arquivo do modelo. Se None, tenta MLflow ou carrega o mais recente.
-            mlflow_model_name: Nome do modelo no MLflow Registry (prioridade sobre model_path)
-            mlflow_stage: Stage do modelo no MLflow (Production, Staging, etc.)
+            model_path: Local model path. If None, fallback to MLflow/latest local.
+            mlflow_model_name: Model name in MLflow Registry (priority over model_path).
+            mlflow_stage: MLflow stage/alias (Production, Staging, etc.).
         """
         self.model_path = model_path
         self.mlflow_model_name = mlflow_model_name
@@ -58,14 +58,14 @@ class ModelPredictor:
         self.model = None
         self.preprocessor = None
         self.feature_engineer = None
-        self.loaded_from = None  # "local" ou "mlflow"
+        self.loaded_from = None  # "local" or "mlflow"
         
         self._load_model()
     
     def _load_model(self) -> None:
-        """Carrega o modelo do MLflow ou arquivo local."""
-        
-        # Tentar carregar do MLflow primeiro
+        """Load model from MLflow or local file."""
+
+        # Try MLflow first
         if self.mlflow_model_name and MLFLOW_AVAILABLE:
             try:
                 self._load_from_mlflow()
@@ -75,14 +75,14 @@ class ModelPredictor:
                     "mlflow_load_failed",
                     model_name=self.mlflow_model_name,
                     error=str(e),
-                    message="Tentando carregar do arquivo local"
+                    message="Trying local file fallback"
                 )
-        
-        # Fallback para arquivo local
+
+        # Local file fallback
         self._load_from_file()
     
     def _load_from_mlflow(self) -> None:
-        """Carrega modelo do MLflow Model Registry."""
+        """Load model from MLflow Model Registry."""
         stage_ref = (self.mlflow_stage or "").strip()
         if stage_ref.lower() == "production":
             model_uri = f"models:/{self.mlflow_model_name}@production"
@@ -92,11 +92,10 @@ class ModelPredictor:
             model_uri = f"models:/{self.mlflow_model_name}/{self.mlflow_stage}"
         logger.info("loading_model_from_mlflow", model_uri=model_uri)
         
-        # Carregar modelo sklearn do MLflow
+        # Load sklearn model artifact from MLflow
         self.model = mlflow.sklearn.load_model(model_uri)
-        
-        # Para MLflow, precisamos carregar preprocessor e feature_engineer separadamente
-        # Eles são salvos como artefatos no run
+
+        # For MLflow, preprocessor/feature_engineer may need separate loading
         registry = ModelRegistry()
         versions = registry.get_latest_versions(self.mlflow_model_name, stages=[self.mlflow_stage])
         
@@ -104,7 +103,7 @@ class ModelPredictor:
             version = versions[0]
             run_id = version.run_id
             
-            # Carregar artefatos adicionais se existirem no run
+            # Load additional run artifacts when available
             client = mlflow.tracking.MlflowClient()
             run = client.get_run(run_id)
             
@@ -114,7 +113,7 @@ class ModelPredictor:
                 "version": f"mlflow-v{version.version}",
                 "trained_at": "mlflow",
                 "metrics": run.data.metrics,
-                "preprocessor": None,  # Será carregado separadamente se necessário
+                "preprocessor": None,  # Can be loaded separately if needed
                 "feature_engineer": None
             }
             
@@ -127,17 +126,17 @@ class ModelPredictor:
             
             self.loaded_from = "mlflow"
         else:
-            raise ValueError(f"Nenhuma versão encontrada para {self.mlflow_model_name} em {self.mlflow_stage}")
+            raise ValueError(f"No version found for {self.mlflow_model_name} in {self.mlflow_stage}")
     
     def _load_from_file(self) -> None:
-        """Carrega o modelo e artefatos do arquivo local."""
+        """Load model and artifacts from local file."""
         if self.model_path is None:
             self.model_path = MODELS_DIR / f"{MODEL_CONFIG['model_name']}_latest.joblib"
         
         logger.info("loading_model_from_file", path=str(self.model_path))
         
         if not self.model_path.exists():
-            raise FileNotFoundError(f"Modelo não encontrado: {self.model_path}")
+            raise FileNotFoundError(f"Model not found: {self.model_path}")
         
         self.artifacts = joblib.load(self.model_path)
         self.model = self.artifacts["model"]
@@ -154,18 +153,18 @@ class ModelPredictor:
     
     def preprocess_input(self, data: Dict[str, Any]) -> pd.DataFrame:
         """
-        Pré-processa dados de entrada para predição.
-        
+        Preprocess input payload before prediction.
+
         Args:
-            data: Dicionário com dados do aluno
-            
+            data: Student input dictionary.
+
         Returns:
-            DataFrame processado
+            Processed DataFrame.
         """
-        # Converter para DataFrame
+        # Convert to DataFrame
         df = pd.DataFrame([data])
-        
-        # Aplicar transformações (se disponíveis)
+
+        # Apply fitted transforms when available
         if self.preprocessor and self.feature_engineer:
             df = self.preprocessor.handle_missing_values(df)
             df = self.feature_engineer.transform(df)
@@ -174,19 +173,19 @@ class ModelPredictor:
     
     def predict(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Faz predição para um único registro.
-        
+        Predict for a single record.
+
         Args:
-            data: Dicionário com dados do aluno
-            
+            data: Student input dictionary.
+
         Returns:
-            Dicionário com predição e probabilidades
+            Dictionary with prediction and probabilities.
         """
         logger.info("making_prediction", input_data=data)
         
-        # Se carregado do MLflow, pode receber features já processadas
+        # MLflow-loaded models may already receive processed features
         if self.loaded_from == "mlflow" or (not self.preprocessor or not self.feature_engineer):
-            # Converter para array numpy diretamente
+            # Convert input to numpy directly
             df = pd.DataFrame([data])
             X = df.values
         else:
@@ -212,13 +211,13 @@ class ModelPredictor:
     
     def predict_batch(self, data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Faz predição para múltiplos registros.
-        
+        Predict for multiple records.
+
         Args:
-            data_list: Lista de dicionários com dados dos alunos
-            
+            data_list: List of student dictionaries.
+
         Returns:
-            Lista de dicionários com predições
+            List of prediction dictionaries.
         """
         logger.info("making_batch_prediction", batch_size=len(data_list))
         
@@ -231,10 +230,10 @@ class ModelPredictor:
     
     def get_model_info(self) -> Dict[str, Any]:
         """
-        Retorna informações sobre o modelo carregado.
-        
+        Return metadata about the loaded model.
+
         Returns:
-            Dicionário com informações do modelo
+            Model metadata dictionary.
         """
         return {
             "model_type": self.artifacts["model_type"],
@@ -249,10 +248,10 @@ class ModelPredictor:
     
     def get_feature_names(self) -> List[str]:
         """
-        Retorna nomes das features utilizadas pelo modelo.
-        
+        Return model feature names.
+
         Returns:
-            Lista com nomes das features
+            Feature name list.
         """
         if self.feature_engineer:
             return self.feature_engineer.feature_names
@@ -265,13 +264,13 @@ class ModelPredictor:
         stage: str = "Production"
     ) -> "ModelPredictor":
         """
-        Factory method para criar preditor do MLflow.
-        
+        Factory method to create predictor from MLflow.
+
         Args:
-            model_name: Nome do modelo no registry
-            stage: Stage (Production, Staging)
-            
+            model_name: Registered model name.
+            stage: Stage/alias (Production, Staging).
+
         Returns:
-            ModelPredictor configurado
+            Configured `ModelPredictor` instance.
         """
         return cls(mlflow_model_name=model_name, mlflow_stage=stage)

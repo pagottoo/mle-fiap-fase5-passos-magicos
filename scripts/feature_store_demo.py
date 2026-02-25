@@ -1,54 +1,64 @@
 #!/usr/bin/env python
 """
-Script de demonstração do Feature Store
+Feature Store demo script
 
-Este script demonstra como usar o Feature Store para:
-1. Registrar definições de features
-2. Ingerir dados de treinamento (offline store)
-3. Materializar features para serving (online store)
-4. Obter features para inferência
+This script demonstrates how to use the Feature Store to:
+1. Register feature definitions
+2. Ingest training data (offline store)
+3. Materialize features for serving (online store)
+4. Retrieve features for inference
 """
 import sys
 from pathlib import Path
 
-# Adicionar o diretório src ao path
+# Add project root to path.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
+import structlog
 from src.feature_store import FeatureStore
 from src.data import DataPreprocessor, FeatureEngineer
 from src.config import DATA_DIR
+from src.monitoring.logger import setup_logging
+
+setup_logging()
+logger = structlog.get_logger().bind(service="passos-magicos", component="feature_store_demo")
+
+
+def _console(message: object, level: str = "info", **kwargs) -> None:
+    log_fn = getattr(logger, level, logger.info)
+    log_fn("demo_output", message=str(message), **kwargs)
 
 
 def main():
-    print("=" * 60)
-    print("DEMONSTRAÇÃO DO FEATURE STORE")
-    print("=" * 60)
+    _console("=" * 60)
+    _console("FEATURE STORE DEMO")
+    _console("=" * 60)
     
-    # 1. Inicializar Feature Store
-    print("\n[1/6] Inicializando Feature Store...")
+    # 1. Initialize Feature Store.
+    _console("\n[1/6] Initializing Feature Store...")
     fs = FeatureStore()
     
     status = fs.get_status()
-    print(f"   * Features registradas: {status['registry']['features']}")
-    print(f"   * Grupos registrados: {status['registry']['groups']}")
+    _console(f"   * Registered features: {status['registry']['features']}")
+    _console(f"   * Registered groups: {status['registry']['groups']}")
     
-    # 2. Listar features disponíveis
-    print("\n[2/6] Features registradas:")
+    # 2. List available features.
+    _console("\n[2/6] Registered features:")
     for feat_name in fs.list_features()[:5]:
         feat = fs.get_feature_definition(feat_name)
-        print(f"   - {feat.name}: {feat.description} (source: {feat.source})")
-    print(f"   ... e mais {len(fs.list_features()) - 5} features")
+        _console(f"   - {feat.name}: {feat.description} (source: {feat.source})")
+    _console(f"   ... and {len(fs.list_features()) - 5} more features")
     
-    # 3. Carregar e preparar dados
-    print("\n[3/6] Carregando e preparando dados...")
+    # 3. Load and prepare data.
+    _console("\n[3/6] Loading and preparing data...")
     data_path = DATA_DIR / "Bases antigas" / "PEDE_PASSOS_DATASET_FIAP.csv"
     
     if not data_path.exists():
-        print(f"   ⚠ Arquivo não encontrado: {data_path}")
-        print("   Criando dados de exemplo...")
+        _console(f"   ⚠ File not found: {data_path}")
+        _console("   Creating sample data...")
         
-        # Criar dados de exemplo
+        # Create sample data.
         df = pd.DataFrame({
             "aluno_id": range(1, 101),
             "INDE": [round(5 + 4 * i/100, 2) for i in range(100)],
@@ -63,7 +73,7 @@ def main():
             "ANOS_PM": [1 + i % 5 for i in range(100)],
             "INSTITUICAO_ENSINO_ALUNO": ["Pública" if i % 3 == 0 else "Privada" for i in range(100)],
             "FASE": [str(i % 4 + 1) for i in range(100)],
-            "PEDRA": ["Quartzo", "Ametista", "Ágata", "Topázio"][i % 4] for i in range(100)],
+            "PEDRA": [["Quartzo", "Ametista", "Ágata", "Topázio"][i % 4] for i in range(100)],
             "BOLSISTA": ["Sim" if i % 2 == 0 else "Não" for i in range(100)],
             "PONTO_VIRADA": ["Sim" if i > 50 else "Não" for i in range(100)]
         })
@@ -71,60 +81,60 @@ def main():
         preprocessor = DataPreprocessor()
         df = preprocessor.prepare_dataset(data_path, year="2022")
         
-        # Adicionar ID
+        # Add ID.
         df["aluno_id"] = range(1, len(df) + 1)
         
-        # Criar target
+        # Create target.
         feature_engineer = FeatureEngineer()
         df = feature_engineer.create_target_variable(df)
     
-    print(f"   * Dados carregados: {len(df)} registros")
+    _console(f"   * Data loaded: {len(df)} rows")
     
-    # 4. Ingerir no Offline Store
-    print("\n[4/6] Ingerindo dados no Offline Store...")
+    # 4. Ingest to Offline Store.
+    _console("\n[4/6] Ingesting data into Offline Store...")
     path = fs.ingest_training_data(df, "passos_magicos_2022", "aluno_id")
-    print(f"   * Dados salvos em: {path}")
+    _console(f"   * Data saved to: {path}")
     
-    # Mostrar estatísticas
+    # Show stats.
     stats = fs.offline_store.compute_statistics("passos_magicos_2022")
-    print(f"   * Registros: {stats['num_rows']}")
-    print(f"   * Colunas: {stats['num_columns']}")
+    _console(f"   * Rows: {stats['num_rows']}")
+    _console(f"   * Columns: {stats['num_columns']}")
     
-    # 5. Materializar no Online Store
-    print("\n[5/6] Materializando features no Online Store...")
+    # 5. Materialize into Online Store.
+    _console("\n[5/6] Materializing features into Online Store...")
     count = fs.materialize_for_serving(df, "alunos_features", "aluno_id")
-    print(f"   * {count} registros materializados")
+    _console(f"   * {count} rows materialized")
     
-    # 6. Demonstrar serving
-    print("\n[6/6] Demonstrando serving de features...")
+    # 6. Demonstrate serving.
+    _console("\n[6/6] Demonstrating feature serving...")
     
-    # Obter features para alguns alunos
+    # Fetch features for selected students.
     entity_ids = [1, 5, 10]
     features_df = fs.get_serving_features("alunos_features", entity_ids)
-    print(f"   * Features recuperadas para {len(entity_ids)} alunos:")
-    print(features_df.head())
+    _console(f"   * Features fetched for {len(entity_ids)} students:")
+    _console(features_df.head())
     
-    # Obter vetor de features para um aluno
-    print("\n   Vetor de features para aluno 1:")
+    # Fetch feature vector for one student.
+    _console("\n   Feature vector for student 1:")
     vector = fs.get_feature_vector("alunos_features", 1)
     for key, value in list(vector.items())[:5]:
-        print(f"   - {key}: {value}")
+        _console(f"   - {key}: {value}")
     
-    # Status final
-    print("\n" + "=" * 60)
-    print("STATUS DO FEATURE STORE")
-    print("=" * 60)
+    # Final status.
+    _console("\n" + "=" * 60)
+    _console("FEATURE STORE STATUS")
+    _console("=" * 60)
     final_status = fs.get_status()
-    print(f"Features registradas: {final_status['registry']['features']}")
-    print(f"Grupos registrados: {final_status['registry']['groups']}")
-    print(f"Datasets offline: {final_status['offline_store']['datasets']}")
-    print(f"Tabelas online: {final_status['online_store']['tables']}")
+    _console(f"Registered features: {final_status['registry']['features']}")
+    _console(f"Registered groups: {final_status['registry']['groups']}")
+    _console(f"Datasets offline: {final_status['offline_store']['datasets']}")
+    _console(f"Online tables: {final_status['online_store']['tables']}")
     
-    print("\n Demonstração concluída com sucesso!")
-    print("\nPróximos passos:")
-    print("- Use fs.get_training_data() para obter dados de treinamento")
-    print("- Use fs.get_serving_features() para inferência em tempo real")
-    print("- Use fs.sync_offline_to_online() para sincronizar stores")
+    _console("\n Demo completed successfully!")
+    _console("\nNext steps:")
+    _console("- Use fs.get_training_data() to retrieve training data")
+    _console("- Use fs.get_serving_features() for real-time inference")
+    _console("- Use fs.sync_offline_to_online() to synchronize stores")
 
 
 if __name__ == "__main__":

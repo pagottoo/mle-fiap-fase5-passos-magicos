@@ -1,5 +1,5 @@
 """
-Módulo de engenharia de features
+Feature engineering module.
 """
 import pandas as pd
 import numpy as np
@@ -12,7 +12,7 @@ logger = structlog.get_logger()
 
 class FeatureEngineer:
     """
-    Classe responsável pela engenharia de features para o modelo de Ponto de Virada.
+    Handles feature engineering for the Turning Point model.
     """
     
     def __init__(self):
@@ -25,49 +25,46 @@ class FeatureEngineer:
     
     def create_target_variable(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Cria a variável target de predição de Ponto de Virada.
-        
-        O Ponto de Virada representa o momento transformador na vida do aluno,
-        quando ele "vira a chave" e começa uma mudança real em sua trajetória.
-        
-        A variável é baseada em:
-        - PONTO_VIRADA: coluna direta se existir (Sim/Não)
-        - Combinação de indicadores altos (INDE, IPV, IDA)
-        
+        Create target variable for Turning Point prediction.
+
+        Target rule:
+        - use `PONTO_VIRADA` directly when present (Yes/No)
+        - otherwise use high-score heuristics (INDE, IPV, PEDRA)
+
         Args:
-            df: DataFrame com os dados
-            
+            df: Input DataFrame.
+
         Returns:
-            DataFrame com coluna target
+            DataFrame with target column.
         """
         logger.info("creating_target_variable")
         
         df = df.copy()
         
-        # Inicializa como 0 (não atingiu ponto de virada)
+        # Initialize with 0 (no turning point)
         df["ponto_virada_pred"] = 0
         
-        # Se existe coluna PONTO_VIRADA, usar diretamente
+        # If PONTO_VIRADA exists, use it directly
         if "PONTO_VIRADA" in df.columns:
-            # Converter para binário
+            # Convert to binary
             df["ponto_virada_pred"] = df["PONTO_VIRADA"].apply(
                 lambda x: 1 if str(x).strip().lower() in ["sim", "yes", "1", "true"] else 0
             )
         else:
-            # Criar target baseado em indicadores de alta performance
-            # IPV (Índice de Propensão à Virada) >= 7.5
+            # Create target from high-performance signals
+            # IPV (Turning Point Propensity Index) >= 7.5
             if "IPV" in df.columns:
                 df["IPV_numeric"] = pd.to_numeric(df["IPV"], errors="coerce")
                 df.loc[df["IPV_numeric"] >= 7.5, "ponto_virada_pred"] = 1
                 df = df.drop(columns=["IPV_numeric"])
             
-            # INDE alto (>= 7.5) também indica potencial
+            # High INDE (>= 7.5) also indicates potential
             if "INDE" in df.columns:
                 df["INDE_numeric"] = pd.to_numeric(df["INDE"], errors="coerce")
                 df.loc[df["INDE_numeric"] >= 7.5, "ponto_virada_pred"] = 1
                 df = df.drop(columns=["INDE_numeric"])
             
-            # PEDRA alta (Topázio ou Ametista com bom desempenho)
+            # Higher PEDRA tiers indicate stronger probability
             if "PEDRA" in df.columns:
                 df.loc[df["PEDRA"].isin(["Topázio", "Ágata"]), "ponto_virada_pred"] = 1
         
@@ -82,31 +79,31 @@ class FeatureEngineer:
     
     def select_features(self, df: pd.DataFrame) -> Tuple[List[str], List[str]]:
         """
-        Seleciona features relevantes para o modelo.
-        
+        Select relevant model features.
+
         Args:
-            df: DataFrame com os dados
-            
+            df: Input DataFrame.
+
         Returns:
-            Tupla com listas de features numéricas e categóricas
+            Tuple with numeric and categorical feature lists.
         """
         logger.info("selecting_features")
         
-        # Features numéricas de interesse (índices de avaliação)
-        # NOTA_PORT, NOTA_MAT, NOTA_ING removidas pois não existem no dataset atual
+        # Main numeric features (evaluation indexes)
+        # NOTA_PORT, NOTA_MAT, NOTA_ING removed because they are absent in the current dataset
         numeric_candidates = [
             "INDE", "IAA", "IEG", "IPS", "IDA", "IPP", "IPV", "IAN",
             "IDADE_ALUNO", "ANOS_PM"
         ]
         
-        # Features categóricas de interesse
-        # PONTO_VIRADA REMOVIDO para evitar data leakage (target derivado desta coluna)
+        # Main categorical features
+        # PONTO_VIRADA removed to avoid data leakage (target is derived from it)
         categorical_candidates = [
             "INSTITUICAO_ENSINO_ALUNO", "FASE", "PEDRA",
             "BOLSISTA", "SINALIZADOR_INGRESSANTE"
         ]
         
-        # Filtrar apenas colunas que existem no DataFrame
+        # Keep only existing columns
         numeric_features = [c for c in numeric_candidates if c in df.columns]
         categorical_features = [c for c in categorical_candidates if c in df.columns]
         
@@ -125,15 +122,15 @@ class FeatureEngineer:
         fit: bool = True
     ) -> pd.DataFrame:
         """
-        Codifica variáveis categóricas usando Label Encoding.
-        
+        Encode categorical variables using LabelEncoding.
+
         Args:
-            df: DataFrame com os dados
-            categorical_features: Lista de features categóricas
-            fit: Se True, ajusta os encoders; se False, usa encoders existentes
-            
+            df: Input DataFrame.
+            categorical_features: Categorical feature list.
+            fit: If True, fit encoders; otherwise reuse existing ones.
+
         Returns:
-            DataFrame com variáveis codificadas
+            DataFrame with encoded variables.
         """
         logger.info("encoding_categorical", features=categorical_features)
         
@@ -145,7 +142,7 @@ class FeatureEngineer:
                 
             if fit:
                 le = LabelEncoder()
-                # Tratar valores desconhecidos
+                # Handle unknown values
                 df[col] = df[col].astype(str)
                 df[f"{col}_encoded"] = le.fit_transform(df[col])
                 self.label_encoders[col] = le
@@ -153,7 +150,7 @@ class FeatureEngineer:
                 if col in self.label_encoders:
                     le = self.label_encoders[col]
                     df[col] = df[col].astype(str)
-                    # Mapear valores desconhecidos para -1
+                    # Map unknown values to -1
                     df[f"{col}_encoded"] = df[col].apply(
                         lambda x: le.transform([x])[0] if x in le.classes_ else -1
                     )
@@ -167,32 +164,32 @@ class FeatureEngineer:
         fit: bool = True
     ) -> pd.DataFrame:
         """
-        Normaliza variáveis numéricas usando StandardScaler.
-        
+        Scale numeric variables using StandardScaler.
+
         Args:
-            df: DataFrame com os dados
-            numeric_features: Lista de features numéricas
-            fit: Se True, ajusta o scaler; se False, usa scaler existente
-            
+            df: Input DataFrame.
+            numeric_features: Numeric feature list.
+            fit: If True, fit scaler; otherwise reuse existing scaler.
+
         Returns:
-            DataFrame com variáveis normalizadas
+            DataFrame with scaled variables.
         """
         logger.info("scaling_numeric", features=numeric_features)
         
         df = df.copy()
         
-        # Converter para numérico
+        # Convert columns to numeric
         for col in numeric_features:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         
-        # Filtrar features que existem
+        # Keep only existing features
         existing_features = [c for c in numeric_features if c in df.columns]
         
         if not existing_features:
             return df
         
-        # Preencher NaN com 0 antes de escalar
+        # Fill NaN with 0 before scaling
         df[existing_features] = df[existing_features].fillna(0)
         
         if fit:
@@ -200,7 +197,7 @@ class FeatureEngineer:
         else:
             scaled_values = self.scaler.transform(df[existing_features])
         
-        # Criar colunas escaladas
+        # Create scaled columns
         for i, col in enumerate(existing_features):
             df[f"{col}_scaled"] = scaled_values[:, i]
         
@@ -208,23 +205,23 @@ class FeatureEngineer:
     
     def fit(self, df: pd.DataFrame) -> "FeatureEngineer":
         """
-        Ajusta o engenheiro de features aos dados de treino.
-        
+        Fit feature engineer on training data.
+
         Args:
-            df: DataFrame de treino
-            
+            df: Training DataFrame.
+
         Returns:
-            Self
+            Self.
         """
         logger.info("fitting_feature_engineer")
         
         self._numeric_features, self._categorical_features = self.select_features(df)
         
-        # Ajustar encoders e scalers
+        # Fit encoders and scaler
         df = self.encode_categorical(df, self._categorical_features, fit=True)
         df = self.scale_numeric(df, self._numeric_features, fit=True)
         
-        # Salvar nomes das features finais
+        # Save final feature names
         self._feature_names = (
             [f"{c}_scaled" for c in self._numeric_features if c in df.columns] +
             [f"{c}_encoded" for c in self._categorical_features if c in df.columns]
@@ -237,16 +234,16 @@ class FeatureEngineer:
     
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Transforma os dados usando encoders e scalers ajustados.
-        
+        Transform data using fitted encoders/scaler.
+
         Args:
-            df: DataFrame a ser transformado
-            
+            df: DataFrame to transform.
+
         Returns:
-            DataFrame transformado
+            Transformed DataFrame.
         """
         if not self._fitted:
-            raise ValueError("O FeatureEngineer precisa ser ajustado (fit) primeiro.")
+            raise ValueError("FeatureEngineer must be fitted before transform.")
         
         df = self.encode_categorical(df, self._categorical_features, fit=False)
         df = self.scale_numeric(df, self._numeric_features, fit=False)
@@ -255,13 +252,13 @@ class FeatureEngineer:
     
     def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Ajusta e transforma os dados em uma única operação.
-        
+        Fit and transform in a single operation.
+
         Args:
-            df: DataFrame a ser processado
-            
+            df: DataFrame to process.
+
         Returns:
-            DataFrame processado
+            Processed DataFrame.
         """
         self.fit(df)
         return self.transform(df)
@@ -271,15 +268,15 @@ class FeatureEngineer:
         df: pd.DataFrame
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Extrai matriz de features e target do DataFrame.
-        
+        Extract feature matrix and target vector from DataFrame.
+
         Args:
-            df: DataFrame processado
-            
+            df: Processed DataFrame.
+
         Returns:
-            Tupla (X, y) com matriz de features e vetor target
+            Tuple `(X, y)` with feature matrix and target vector.
         """
-        # Selecionar apenas colunas de features que existem
+        # Keep only existing feature columns
         available_features = [c for c in self._feature_names if c in df.columns]
         
         X = df[available_features].values
@@ -292,5 +289,5 @@ class FeatureEngineer:
     
     @property
     def feature_names(self) -> List[str]:
-        """Retorna nomes das features."""
+        """Return engineered feature names."""
         return self._feature_names

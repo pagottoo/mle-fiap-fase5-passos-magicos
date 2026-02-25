@@ -1,20 +1,29 @@
 """
-Script principal de treinamento do modelo
+Main model training script.
 """
+
 import argparse
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-# Adicionar o diretório src ao path
+from structlog.contextvars import bind_contextvars, clear_contextvars
+
+# Add project root to import path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data import DataPreprocessor, FeatureEngineer
-from src.models import ModelTrainer
-from src.feature_store import FeatureStore
 from src.config import DATA_DIR
+from src.data import DataPreprocessor, FeatureEngineer
+from src.feature_store import FeatureStore
+from src.models import ModelTrainer
+from src.monitoring.job_metrics import JobMetricsPusher
+from src.monitoring.logger import get_logger, setup_logging
+
+setup_logging()
+logger = get_logger(component="training_job")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -25,54 +34,54 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Treinamento do modelo Passos Mágicos")
+    parser = argparse.ArgumentParser(description="Passos Magicos model training")
 
     parser.add_argument(
         "--data-source",
         choices=["local", "s3"],
         default=os.getenv("TRAIN_DATA_SOURCE", "local"),
-        help="Origem do dataset de treino",
+        help="Training dataset source",
     )
     parser.add_argument(
         "--data-path",
         default=os.getenv("TRAIN_DATA_PATH", ""),
-        help="Caminho local do dataset (quando data-source=local)",
+        help="Local dataset path (when data-source=local)",
     )
     parser.add_argument(
         "--s3-uri",
         default=os.getenv("TRAIN_S3_URI", ""),
-        help="URI S3 do dataset (ex: s3://bucket/path/dataset.csv)",
+        help="S3 dataset URI (e.g. s3://bucket/path/dataset.csv)",
     )
     parser.add_argument(
         "--s3-endpoint-url",
         default=os.getenv("TRAIN_S3_ENDPOINT_URL", os.getenv("AWS_ENDPOINT_URL", "")),
-        help="Endpoint S3 compatível (ex: MinIO). Opcional.",
+        help="S3-compatible endpoint (e.g. MinIO). Optional.",
     )
     parser.add_argument(
         "--local-download-path",
         default=os.getenv("TRAIN_LOCAL_DOWNLOAD_PATH", "/tmp/passos_magicos_training.csv"),
-        help="Caminho local para salvar o dataset baixado do S3",
+        help="Local destination path for S3 download",
     )
     parser.add_argument(
         "--year",
         default=os.getenv("TRAIN_DATA_YEAR", "2022"),
-        help="Ano usado no pré-processamento (sufixo das colunas)",
+        help="Year suffix used during preprocessing",
     )
     parser.add_argument(
         "--model-type",
         default=os.getenv("TRAIN_MODEL_TYPE", "random_forest"),
         choices=["random_forest", "gradient_boosting", "logistic_regression"],
-        help="Tipo de modelo",
+        help="Model type",
     )
     parser.add_argument(
         "--experiment-name",
         default=os.getenv("MLFLOW_EXPERIMENT_NAME", "passos-magicos-ponto-virada"),
-        help="Nome do experimento MLflow",
+        help="MLflow experiment name",
     )
     parser.add_argument(
         "--mlflow-model-name",
         default=os.getenv("MLFLOW_MODEL_NAME", "passos-magicos-ponto-virada"),
-        help="Nome do modelo no MLflow Registry",
+        help="Model name in MLflow Registry",
     )
 
     default_promote = _env_bool("TRAIN_PROMOTE_TO_STAGING", True)
@@ -81,33 +90,33 @@ def _parse_args() -> argparse.Namespace:
         dest="promote_to_staging",
         action="store_true",
         default=default_promote,
-        help="Promove a última versão registrada para Staging",
+        help="Promote latest registered version to Staging",
     )
     parser.add_argument(
         "--no-promote-to-staging",
         dest="promote_to_staging",
         action="store_false",
-        help="Não promove para Staging após registrar no MLflow",
+        help="Do not promote to Staging after MLflow registration",
     )
 
     return parser.parse_args()
 
 
 def _download_from_s3(s3_uri: str, target_path: Path, endpoint_url: str = "") -> Path:
-    """Baixa o dataset do S3 para caminho local."""
+    """Download dataset from S3 to local path."""
     parsed = urlparse(s3_uri)
     if parsed.scheme != "s3" or not parsed.netloc or not parsed.path:
-        raise ValueError(f"URI S3 inválida: {s3_uri}")
+        raise ValueError(f"Invalid S3 URI: {s3_uri}")
 
     bucket = parsed.netloc
     key = parsed.path.lstrip("/")
     if not key:
-        raise ValueError(f"URI S3 sem key: {s3_uri}")
+        raise ValueError(f"S3 URI has no object key: {s3_uri}")
 
     try:
         import boto3
     except ImportError as exc:
-        raise RuntimeError("boto3 não instalado. Adicione boto3 nas dependências.") from exc
+        raise RuntimeError("boto3 is not installed. Add boto3 to dependencies.") from exc
 
     client_kwargs = {}
     region = os.getenv("AWS_DEFAULT_REGION", "").strip()
@@ -117,21 +126,36 @@ def _download_from_s3(s3_uri: str, target_path: Path, endpoint_url: str = "") ->
         client_kwargs["endpoint_url"] = endpoint_url.strip()
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "training_data_download_started",
+        source="s3",
+        s3_bucket=bucket,
+        s3_key=key,
+        target_path=str(target_path),
+        s3_endpoint=endpoint_url.strip() or None,
+    )
+
     s3_client = boto3.client("s3", **client_kwargs)
     s3_client.download_file(bucket, key, str(target_path))
+
+    logger.info(
+        "training_data_download_completed",
+        source="s3",
+        target_path=str(target_path),
+    )
     return target_path
 
 
 def _resolve_data_path(args: argparse.Namespace) -> Path:
-    """Resolve o dataset de treino com base na origem configurada."""
+    """Resolve training dataset path based on configured source."""
     if args.data_source == "local":
         if args.data_path:
             return Path(args.data_path)
         return DATA_DIR / "Bases antigas" / "PEDE_PASSOS_DATASET_FIAP.csv"
 
-    # data_source == s3
     if not args.s3_uri:
-        raise ValueError("TRAIN_S3_URI/--s3-uri é obrigatório quando data-source=s3")
+        raise ValueError("TRAIN_S3_URI/--s3-uri is required when data-source=s3")
+
     return _download_from_s3(
         s3_uri=args.s3_uri,
         target_path=Path(args.local_download_path),
@@ -140,167 +164,279 @@ def _resolve_data_path(args: argparse.Namespace) -> Path:
 
 
 def main():
-    """Pipeline principal de treinamento."""
-    args = _parse_args()
+    """Main training pipeline."""
+    started_at = time.time()
+    metrics_pusher = JobMetricsPusher(component="training")
+    bind_contextvars(run_id=f"training-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
 
-    print("=" * 60)
-    print("PIPELINE DE TREINAMENTO - PASSOS MÁGICOS")
-    print("Modelo de Predição de Ponto de Virada")
-    print("=" * 60)
+    exit_code = 0
+    success = False
 
-    print(f"\nConfiguração:")
-    print(f" data_source: {args.data_source}")
-    print(f" model_type: {args.model_type}")
-    print(f" year: {args.year}")
-    print(f" experiment_name: {args.experiment_name}")
-    print(f" mlflow_model_name: {args.mlflow_model_name}")
-    print(f" promote_to_staging: {args.promote_to_staging}")
-
-    # 0. Inicializar Feature Store
-    print("\n[0/7] Inicializando Feature Store...")
-    feature_store = FeatureStore()
-    print(f"Feature Store inicializada")
-    print(f"Features registradas: {len(feature_store.list_features())}")
-
-    # 1. Carregar e preparar dados
-    print("\n[1/7] Carregando dados...")
-    data_path = _resolve_data_path(args)
-    print(f"Dataset resolvido em: {data_path}")
-
-    preprocessor = DataPreprocessor()
-    df = preprocessor.prepare_dataset(data_path, year=args.year)
-
-    # Adicionar ID único para cada aluno
-    df["aluno_id"] = range(1, len(df) + 1)
-
-    print(f"Dados carregados: {len(df)} registros")
-
-    # 2. Engenharia de features
-    print("\n[2/7] Engenharia de features...")
-    feature_engineer = FeatureEngineer()
-    df = feature_engineer.create_target_variable(df)
-    df = feature_engineer.fit_transform(df)
-
-    X, y = feature_engineer.get_feature_matrix(df)
-    print(f"Features criadas: {len(feature_engineer.feature_names)}")
-    print(f"Distribuição target: {y.sum()} ponto de virada / {len(y) - y.sum()} sem ponto de virada")
-
-    # 2.5 Ingerir dados no Feature Store (Offline)
-    print("\n[2.5/7] Salvando features no Feature Store...")
-    dataset_path = feature_store.ingest_training_data(
-        df,
-        dataset_name="passos_magicos_training",
-        entity_column="aluno_id",
-    )
-    print(f"Dados salvos no Offline Store: {dataset_path}")
-
-    # 3. Divisão dos dados
-    print("\n[3/7] Dividindo dados...")
-    trainer = ModelTrainer(
-        model_type=args.model_type,
-        experiment_name=args.experiment_name,
-        enable_mlflow=True,
-    )
+    trainer = None
+    preprocessor = None
+    feature_engineer = None
+    feature_store = None
 
     run_started = False
+    run_id = None
     model_uri = None
     promoted_version = None
+    train_metrics = {}
+
+    args = _parse_args()
+    logger.info(
+        "training_job_started",
+        data_source=args.data_source,
+        model_type=args.model_type,
+        year=args.year,
+        experiment_name=args.experiment_name,
+        mlflow_model_name=args.mlflow_model_name,
+        promote_to_staging=args.promote_to_staging,
+    )
 
     try:
+        logger.info("training_step_started", step="feature_store_init", step_order="0/7")
+        feature_store = FeatureStore()
+        logger.info(
+            "training_step_completed",
+            step="feature_store_init",
+            features_registered=len(feature_store.list_features()),
+        )
+
+        logger.info("training_step_started", step="load_data", step_order="1/7")
+        data_path = _resolve_data_path(args)
+        logger.info("training_dataset_resolved", data_path=str(data_path))
+
+        preprocessor = DataPreprocessor()
+        df = preprocessor.prepare_dataset(data_path, year=args.year)
+        df["aluno_id"] = range(1, len(df) + 1)
+
+        logger.info(
+            "training_step_completed",
+            step="load_data",
+            records=len(df),
+        )
+
+        logger.info("training_step_started", step="feature_engineering", step_order="2/7")
+        feature_engineer = FeatureEngineer()
+        df = feature_engineer.create_target_variable(df)
+        df = feature_engineer.fit_transform(df)
+
+        X, y = feature_engineer.get_feature_matrix(df)
+        turning_point_count = int(y.sum())
+        logger.info(
+            "training_step_completed",
+            step="feature_engineering",
+            features_created=len(feature_engineer.feature_names),
+            records=len(df),
+            turning_point_count=turning_point_count,
+            no_turning_point_count=int(len(y) - turning_point_count),
+        )
+
+        logger.info("training_step_started", step="offline_store_ingest", step_order="2.5/7")
+        dataset_path = feature_store.ingest_training_data(
+            df,
+            dataset_name="passos_magicos_training",
+            entity_column="aluno_id",
+        )
+        logger.info(
+            "training_step_completed",
+            step="offline_store_ingest",
+            offline_dataset_path=str(dataset_path),
+        )
+
+        logger.info("training_step_started", step="split_and_train_setup", step_order="3/7")
+        trainer = ModelTrainer(
+            model_type=args.model_type,
+            experiment_name=args.experiment_name,
+            enable_mlflow=True,
+        )
+
         run_name = f"k8s-{args.model_type}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         trainer.start_run(
             run_name=run_name,
             description=f"data_source={args.data_source};data_path={data_path};year={args.year}",
         )
         run_started = True
+        run_id = trainer.run_id
+        if run_id:
+            bind_contextvars(run_id=run_id)
 
         X_train, X_test, y_train, y_test = trainer.split_data(X, y)
-        print(f"Treino: {len(X_train)} | Teste: {len(X_test)}")
+        logger.info(
+            "training_step_completed",
+            step="split_and_train_setup",
+            run_name=run_name,
+            run_id=run_id,
+            train_samples=len(X_train),
+            test_samples=len(X_test),
+        )
 
-        # 4. Validação cruzada
-        print("\n[4/7] Validação cruzada...")
+        logger.info("training_step_started", step="cross_validation", step_order="4/7")
         cv_results = trainer.cross_validate(X_train, y_train)
-        print(f"F1-Score CV: {cv_results['f1']['mean']:.4f} (+/- {cv_results['f1']['std']:.4f})")
-        print(f"ROC-AUC CV: {cv_results['roc_auc']['mean']:.4f} (+/- {cv_results['roc_auc']['std']:.4f})")
+        logger.info(
+            "training_step_completed",
+            step="cross_validation",
+            cv_f1_mean=cv_results["f1"]["mean"],
+            cv_f1_std=cv_results["f1"]["std"],
+            cv_roc_auc_mean=cv_results["roc_auc"]["mean"],
+            cv_roc_auc_std=cv_results["roc_auc"]["std"],
+        )
 
-        # 5. Treinamento final
-        print("\n[5/7] Treinamento final...")
+        logger.info("training_step_started", step="final_training", step_order="5/7")
         trainer.train(X_train, y_train)
-        metrics = trainer.evaluate(X_test, y_test)
+        train_metrics = trainer.evaluate(X_test, y_test)
+        logger.info(
+            "training_step_completed",
+            step="final_training",
+            accuracy=train_metrics.get("accuracy"),
+            precision=train_metrics.get("precision"),
+            recall=train_metrics.get("recall"),
+            f1_score=train_metrics.get("f1_score"),
+            roc_auc=train_metrics.get("roc_auc"),
+        )
 
-        print(f"Accuracy: {metrics['accuracy']:.4f}")
-        print(f"Precision: {metrics['precision']:.4f}")
-        print(f"Recall: {metrics['recall']:.4f}")
-        print(f"F1-Score: {metrics['f1_score']:.4f}")
-        print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
-
-        # 6. Salvar modelo
-        print("\n[6/7] Salvando modelo...")
+        logger.info("training_step_started", step="save_model", step_order="6/7")
         model_path = trainer.save_model(preprocessor, feature_engineer)
-        print(f"Modelo salvo em: {model_path}")
+        logger.info(
+            "training_step_completed",
+            step="save_model",
+            model_path=str(model_path),
+        )
 
-        # Registrar no MLflow Registry
-        print("\n[6.5/7] Registrando modelo no MLflow...")
+        logger.info("training_step_started", step="mlflow_register", step_order="6.5/7")
         model_uri = trainer.log_model_to_mlflow(
             X_sample=X_test[:5],
             y_sample=y_test[:5],
             registered_model_name=args.mlflow_model_name,
         )
         if model_uri:
-            print(f"Modelo registrado no MLflow: {model_uri}")
+            logger.info(
+                "training_step_completed",
+                step="mlflow_register",
+                model_uri=model_uri,
+                mlflow_model_name=args.mlflow_model_name,
+            )
         else:
-            print("Modelo não registrado no MLflow (verifique MLFLOW_ENABLED e MLFLOW_TRACKING_URI)")
+            logger.warning(
+                "training_step_warning",
+                step="mlflow_register",
+                reason="model_not_registered",
+                mlflow_enabled="verify_MLFLOW_ENABLED_and_MLFLOW_TRACKING_URI",
+            )
 
         if args.promote_to_staging and trainer.model_registry:
             versions = trainer.model_registry.get_latest_versions(args.mlflow_model_name)
             if versions:
                 promoted_version = int(versions[0].version)
                 trainer.model_registry.promote_to_staging(args.mlflow_model_name, promoted_version)
-                print(f"Versão {promoted_version} promovida para Staging")
+                logger.info(
+                    "training_model_promoted_to_staging",
+                    mlflow_model_name=args.mlflow_model_name,
+                    promoted_version=promoted_version,
+                )
+                bind_contextvars(model_version=str(promoted_version))
             else:
-                print("Nenhuma versão encontrada para promoção em Staging")
+                logger.warning(
+                    "training_model_promote_skipped",
+                    reason="no_versions_found",
+                    mlflow_model_name=args.mlflow_model_name,
+                )
 
-        # 7. Materializar features no Online Store (para inferência)
-        print("\n[7/7] Materializando features para inferência...")
+        logger.info("training_step_started", step="materialize_online_store", step_order="7/7")
         count = feature_store.materialize_for_serving(
             df,
             table_name="alunos_features",
             entity_column="aluno_id",
         )
-        print(f"{count} registros materializados no Online Store")
 
-        # Sincronizar Offline -> Online para garantir consistência
         feature_store.sync_offline_to_online(
             dataset_name="passos_magicos_training",
             table_name="alunos_inference",
             entity_column="aluno_id",
         )
-        print(f"Dados sincronizados Offline -> Online")
+        logger.info(
+            "training_step_completed",
+            step="materialize_online_store",
+            online_records=count,
+            online_table="alunos_features",
+            sync_table="alunos_inference",
+        )
 
-    except Exception:
-        if run_started:
+        success = True
+
+    except Exception as exc:
+        exit_code = 1
+        logger.error(
+            "training_job_failed",
+            error=str(exc),
+            run_id=run_id,
+            exc_info=True,
+        )
+
+        if run_started and trainer is not None:
             trainer.end_run(status="FAILED")
+            logger.info(
+                "training_mlflow_run_ended",
+                run_id=run_id,
+                status="FAILED",
+            )
         raise
+
     else:
-        if run_started:
+        if run_started and trainer is not None:
             trainer.end_run(status="FINISHED")
+            logger.info(
+                "training_mlflow_run_ended",
+                run_id=run_id,
+                status="FINISHED",
+            )
 
-    # Resumo do modelo
-    print("\n" + "=" * 60)
-    print(trainer.get_model_summary())
+        if feature_store is not None:
+            status = feature_store.get_status()
+            logger.info(
+                "training_feature_store_status",
+                datasets_offline=status["offline_store"].get("datasets", []),
+                tables_online=status["online_store"].get("tables", []),
+            )
 
-    # Status do Feature Store
-    print("\n" + "=" * 60)
-    print("STATUS DO FEATURE STORE")
-    print("=" * 60)
-    status = feature_store.get_status()
-    print(f"Datasets offline: {status['offline_store']['datasets']}")
-    print(f"Tabelas online: {status['online_store']['tables']}")
+        if trainer is not None:
+            logger.info(
+                "training_model_summary_generated",
+                summary=trainer.get_model_summary(),
+            )
 
-    print("\nOutputs:")
-    print(f"mlflow_model_uri: {model_uri}")
-    print(f"promoted_staging_version: {promoted_version}")
-    print("\n Pipeline de treinamento concluído com sucesso!")
+        logger.info(
+            "training_job_completed",
+            model_uri=model_uri,
+            promoted_staging_version=promoted_version,
+            run_id=run_id,
+        )
+
+    finally:
+        duration = time.time() - started_at
+        extra_metrics = {
+            "training_last_f1_score": float(train_metrics.get("f1_score", 0.0) or 0.0),
+            "training_last_roc_auc": float(train_metrics.get("roc_auc", 0.0) or 0.0),
+            "training_last_registered_model": 1.0 if model_uri else 0.0,
+            "training_last_promoted_version": float(promoted_version or 0),
+        }
+
+        metrics_pusher.push_run_metrics(
+            success=success,
+            duration_seconds=duration,
+            exit_code=exit_code,
+            extra_metrics=extra_metrics,
+        )
+
+        logger.info(
+            "training_job_final_status",
+            success=success,
+            exit_code=exit_code,
+            duration_seconds=round(duration, 4),
+            run_id=run_id,
+        )
+        clear_contextvars()
 
     return trainer, preprocessor, feature_engineer, feature_store
 

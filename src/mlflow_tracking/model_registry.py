@@ -1,11 +1,11 @@
 """
 Model Registry - MLflow Model Management
 
-Responsável por:
-- Registrar modelos no MLflow Model Registry
-- Gerenciar versões de modelos
-- Transicionar modelos via aliases (staging, production)
-- Carregar modelos para inferência
+Responsible for:
+- Registering models in the MLflow Model Registry
+- Managing model versions
+- Transitioning models via aliases (staging, production)
+- Loading models for inference
 """
 import os
 from typing import Dict, List, Optional
@@ -18,9 +18,9 @@ import structlog
 logger = structlog.get_logger()
 
 
-# Stages disponíveis no MLflow
+# Available stages in MLflow
 class ModelStage:
-    """Constantes para stages de modelo."""
+    """Model stage constants."""
     NONE = "None"
     STAGING = "Staging"
     PRODUCTION = "Production"
@@ -28,38 +28,38 @@ class ModelStage:
 
 
 class ModelAlias:
-    """Aliases usados no Model Registry."""
+    """Aliases used in the Model Registry."""
     STAGING = "staging"
     PRODUCTION = "production"
 
 
 class ModelRegistry:
     """
-    Gerencia o Model Registry do MLflow.
+    Manage the MLflow Model Registry.
     
-    Permite:
-    - Registrar novos modelos
-    - Listar versões
-    - Promover/rebaixar modelos entre stages
-    - Carregar modelos para produção
+    It supports:
+    - Registering new models
+    - Listing versions
+    - Promoting/demoting models across stages
+    - Loading models for production
     
-    Exemplo de uso:
+    Example:
         registry = ModelRegistry()
         
-        # Registrar modelo
+        # Register model
         registry.register_model(
             model_uri="runs:/abc123/model",
             name="passos-magicos-classifier"
         )
         
-        # Promover para produção
+        # Promote to production
         registry.transition_model_stage(
             name="passos-magicos-classifier",
             version=1,
             stage="Production"
         )
         
-        # Carregar modelo de produção
+        # Load production model
         model = registry.load_production_model("passos-magicos-classifier")
     """
     
@@ -67,10 +67,10 @@ class ModelRegistry:
     
     def __init__(self, tracking_uri: Optional[str] = None):
         """
-        Inicializa o Model Registry.
+        Initialize the Model Registry.
         
         Args:
-            tracking_uri: URI do MLflow server
+            tracking_uri: MLflow server URI
         """
         self.tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI", "./mlruns")
         mlflow.set_tracking_uri(self.tracking_uri)
@@ -79,7 +79,7 @@ class ModelRegistry:
         logger.info("model_registry_initialized", tracking_uri=self.tracking_uri)
 
     def _normalize_stage(self, stage: str) -> str:
-        """Normaliza o nome do stage para as constantes internas."""
+        """Normalize stage names to internal constants."""
         if not stage:
             return ModelStage.NONE
 
@@ -95,7 +95,7 @@ class ModelRegistry:
         return stage
 
     def _stage_to_alias(self, stage: str) -> Optional[str]:
-        """Mapeia stage legado para alias moderno."""
+        """Map legacy stage names to modern aliases."""
         normalized = self._normalize_stage(stage)
         if normalized == ModelStage.STAGING:
             return ModelAlias.STAGING
@@ -106,14 +106,14 @@ class ModelRegistry:
     def _get_model_version_by_alias(
         self, name: str, alias: str
     ) -> Optional[mlflow.entities.model_registry.ModelVersion]:
-        """Obtém versão por alias, retornando None quando não existe."""
+        """Get model version by alias; return None when it does not exist."""
         try:
             return self.client.get_model_version_by_alias(name, alias)
         except MlflowException:
             return None
 
     def _remove_alias_if_points_to_version(self, name: str, alias: str, version: int) -> None:
-        """Remove alias quando ele aponta para uma versão específica."""
+        """Remove an alias if it currently points to a specific version."""
         current = self._get_model_version_by_alias(name, alias)
         if current is None or str(current.version) != str(version):
             return
@@ -135,31 +135,31 @@ class ModelRegistry:
         description: Optional[str] = None
     ) -> mlflow.entities.model_registry.ModelVersion:
         """
-        Registra um modelo no Model Registry.
+        Register a model in the Model Registry.
         
         Args:
-            model_uri: URI do modelo (ex: "runs:/run_id/model")
-            name: Nome do modelo registrado
-            tags: Tags para a versão
-            description: Descrição da versão
+            model_uri: Model URI (example: "runs:/run_id/model")
+            name: Registered model name
+            tags: Version tags
+            description: Version description
             
         Returns:
-            ModelVersion com informações da versão criada
+            ModelVersion with created version metadata
         """
-        # Criar modelo registrado se não existe
+        # Create the registered model if needed.
         try:
             self.client.get_registered_model(name)
         except MlflowException:
             self.client.create_registered_model(
                 name=name,
-                description=f"Modelo de predição de Ponto de Virada - Passos Mágicos"
+                description="Passos Magicos turning-point prediction model"
             )
             logger.info("registered_model_created", name=name)
         
-        # Registrar nova versão
+        # Register new version.
         model_version = mlflow.register_model(model_uri=model_uri, name=name)
         
-        # Adicionar tags e descrição
+        # Attach tags and description.
         if tags:
             for key, value in tags.items():
                 self.client.set_model_version_tag(name, model_version.version, key, value)
@@ -188,24 +188,24 @@ class ModelRegistry:
         archive_existing_versions: bool = True
     ) -> mlflow.entities.model_registry.ModelVersion:
         """
-        Transiciona modelo para um novo stage.
+        Transition model to a new stage.
         
         Args:
-            name: Nome do modelo registrado
-            version: Versão a transicionar
-            stage: Novo stage (Staging, Production, Archived)
-            archive_existing_versions: Arquivar outras versões no mesmo stage
+            name: Registered model name
+            version: Version to transition
+            stage: Target stage (Staging, Production, Archived)
+            archive_existing_versions: Archive other versions in the same stage
             
         Returns:
-            ModelVersion atualizada
+            Updated ModelVersion
         """
         normalized_stage = self._normalize_stage(stage)
         if normalized_stage not in [ModelStage.STAGING, ModelStage.PRODUCTION, ModelStage.ARCHIVED, ModelStage.NONE]:
-            raise ValueError(f"Stage inválido: {stage}")
+            raise ValueError(f"Invalid stage: {stage}")
 
         alias = self._stage_to_alias(normalized_stage)
         if alias:
-            # API moderna do MLflow: aliases substituem stages legados.
+            # Modern MLflow API: aliases replace legacy stage transitions.
             self.client.set_registered_model_alias(name=name, alias=alias, version=str(version))
             model_version = self.client.get_model_version(name=name, version=str(version))
 
@@ -218,8 +218,8 @@ class ModelRegistry:
             )
             return model_version
 
-        # Stages legados não mapeados para alias: mantém apenas metadado e
-        # remove aliases de serving quando aplicável.
+        # For legacy stages not mapped to aliases, keep metadata only and
+        # remove serving aliases when applicable.
         if normalized_stage in [ModelStage.ARCHIVED, ModelStage.NONE]:
             self._remove_alias_if_points_to_version(name, ModelAlias.PRODUCTION, version)
             self._remove_alias_if_points_to_version(name, ModelAlias.STAGING, version)
@@ -244,19 +244,19 @@ class ModelRegistry:
             )
             return model_version
 
-        # Guard clause (não deve acontecer, mas deixa fluxo explícito).
-        raise ValueError(f"Stage inválido: {stage}")
+        # Guard clause (should not happen, but keeps the flow explicit).
+        raise ValueError(f"Invalid stage: {stage}")
     
     def promote_to_staging(self, name: str, version: int) -> mlflow.entities.model_registry.ModelVersion:
-        """Promove modelo para Staging."""
+        """Promote a model version to Staging."""
         return self.transition_model_stage(name, version, ModelStage.STAGING)
     
     def promote_to_production(self, name: str, version: int) -> mlflow.entities.model_registry.ModelVersion:
-        """Promove modelo para Production."""
+        """Promote a model version to Production."""
         return self.transition_model_stage(name, version, ModelStage.PRODUCTION)
     
     def archive_model(self, name: str, version: int) -> mlflow.entities.model_registry.ModelVersion:
-        """Arquiva uma versão do modelo."""
+        """Archive a model version."""
         return self.transition_model_stage(name, version, ModelStage.ARCHIVED)
     
     def get_latest_versions(
@@ -265,14 +265,14 @@ class ModelRegistry:
         stages: Optional[List[str]] = None
     ) -> List[mlflow.entities.model_registry.ModelVersion]:
         """
-        Obtém as versões mais recentes de um modelo por stage.
+        Get the latest versions of a model by stage.
         
         Args:
-            name: Nome do modelo
-            stages: Lista de stages (None = todos)
+            name: Model name
+            stages: List of stages (None = all)
             
         Returns:
-            Lista de ModelVersion
+            List of ModelVersion objects
         """
         try:
             if stages:
@@ -285,7 +285,7 @@ class ModelRegistry:
                             versions.append(mv)
                         continue
 
-                    # Fallback para filtros não mapeados em alias.
+                    # Fallback for filters not mapped to aliases.
                     normalized = self._normalize_stage(stage)
                     candidates = [
                         v for v in self.search_model_versions(f"name='{name}'")
@@ -302,11 +302,11 @@ class ModelRegistry:
             return []
     
     def get_production_version(self, name: str = DEFAULT_MODEL_NAME) -> Optional[mlflow.entities.model_registry.ModelVersion]:
-        """Obtém a versão em produção."""
+        """Get the production version."""
         return self._get_model_version_by_alias(name, ModelAlias.PRODUCTION)
     
     def get_staging_version(self, name: str = DEFAULT_MODEL_NAME) -> Optional[mlflow.entities.model_registry.ModelVersion]:
-        """Obtém a versão em staging."""
+        """Get the staging version."""
         return self._get_model_version_by_alias(name, ModelAlias.STAGING)
     
     def load_model(
@@ -316,15 +316,15 @@ class ModelRegistry:
         stage: Optional[str] = None
     ):
         """
-        Carrega modelo do registry.
+        Load a model from the registry.
         
         Args:
-            name: Nome do modelo
-            version: Versão específica (prioridade sobre stage)
-            stage: Stage do modelo (Production, Staging, etc.)
+            name: Model name
+            version: Specific version (takes precedence over stage)
+            stage: Model stage (Production, Staging, etc.)
             
         Returns:
-            Modelo carregado
+            Loaded model object
         """
         if version:
             model_uri = f"models:/{name}/{version}"
@@ -335,7 +335,7 @@ class ModelRegistry:
             else:
                 model_uri = f"models:/{name}/{stage}"
         else:
-            # Padrão: Production, se não existir, última versão
+            # Default: Production, otherwise latest version.
             prod_version = self.get_production_version(name)
             if prod_version:
                 model_uri = f"models:/{name}@{ModelAlias.PRODUCTION}"
@@ -348,15 +348,15 @@ class ModelRegistry:
         return model
     
     def load_production_model(self, name: str = DEFAULT_MODEL_NAME):
-        """Carrega o modelo em produção."""
+        """Load the production model."""
         return self.load_model(name, stage=ModelStage.PRODUCTION)
     
     def load_staging_model(self, name: str = DEFAULT_MODEL_NAME):
-        """Carrega o modelo em staging."""
+        """Load the staging model."""
         return self.load_model(name, stage=ModelStage.STAGING)
     
     def list_registered_models(self) -> List[mlflow.entities.model_registry.RegisteredModel]:
-        """Lista todos os modelos registrados."""
+        """List all registered models."""
         return list(self.client.search_registered_models())
     
     def get_model_version_details(
@@ -365,10 +365,10 @@ class ModelRegistry:
         version: int
     ) -> Dict:
         """
-        Obtém detalhes de uma versão específica.
+        Get details for a specific version.
         
         Returns:
-            Dicionário com detalhes da versão
+            Dictionary with version details
         """
         mv = self.client.get_model_version(name, str(version))
 
@@ -403,15 +403,15 @@ class ModelRegistry:
         version2: int
     ) -> Dict:
         """
-        Compara duas versões de um modelo.
+        Compare two model versions.
         
         Returns:
-            Dicionário com comparação de métricas
+            Dictionary with metrics comparison
         """
         v1 = self.get_model_version_details(name, version1)
         v2 = self.get_model_version_details(name, version2)
         
-        # Buscar runs para obter métricas
+        # Fetch runs to retrieve metrics.
         run1 = self.client.get_run(v1["run_id"]) if v1.get("run_id") else None
         run2 = self.client.get_run(v2["run_id"]) if v2.get("run_id") else None
         
@@ -431,12 +431,12 @@ class ModelRegistry:
         }
     
     def delete_model_version(self, name: str, version: int) -> None:
-        """Deleta uma versão do modelo."""
+        """Delete a model version."""
         self.client.delete_model_version(name, str(version))
         logger.info("model_version_deleted", name=name, version=version)
     
     def delete_registered_model(self, name: str) -> None:
-        """Deleta um modelo registrado (todas as versões)."""
+        """Delete a registered model (all versions)."""
         self.client.delete_registered_model(name)
         logger.info("registered_model_deleted", name=name)
     
@@ -446,11 +446,11 @@ class ModelRegistry:
         max_results: int = 100
     ) -> List[mlflow.entities.model_registry.ModelVersion]:
         """
-        Busca versões de modelo com filtro.
+        Search model versions with a filter.
         
         Args:
-            filter_string: Filtro MLflow (ex: "name='model-name'")
-            max_results: Máximo de resultados
+            filter_string: MLflow filter string (example: "name='model-name'")
+            max_results: Maximum number of results
         """
         return list(self.client.search_model_versions(
             filter_string=filter_string,
@@ -464,15 +464,15 @@ class ModelRegistry:
         stage: Optional[str] = None
     ) -> str:
         """
-        Gera URI do modelo para carregamento.
+        Build a model URI for loading.
         
         Args:
-            name: Nome do modelo
-            version: Versão específica
+            name: Model name
+            version: Specific version
             stage: Stage (Production, Staging)
             
         Returns:
-            URI no formato models:/name/version_or_stage
+            URI in the format models:/name/version_or_stage
         """
         if version:
             return f"models:/{name}/{version}"
@@ -491,15 +491,15 @@ class ModelRegistry:
         key: str,
         value: str
     ) -> None:
-        """Define uma tag em uma versão do modelo."""
+        """Set a tag on a model version."""
         self.client.set_model_version_tag(name, str(version), key, value)
     
     def get_registry_status(self) -> Dict:
         """
-        Retorna status do Model Registry.
+        Return Model Registry status.
         
         Returns:
-            Dicionário com estatísticas
+            Dictionary with aggregated statistics
         """
         models = self.list_registered_models()
         
