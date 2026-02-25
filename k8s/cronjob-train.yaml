@@ -13,6 +13,9 @@ data:
   TRAIN_LOCAL_DOWNLOAD_PATH: "/tmp/passos_magicos_training.csv"
   MLFLOW_EXPERIMENT_NAME: "passos-magicos-ponto-virada"
   MLFLOW_MODEL_NAME: "passos-magicos-ponto-virada"
+  PUSHGATEWAY_URL: "http://passos-magicos-pushgateway:9091"
+  PUSHGATEWAY_JOB_NAME: "passos-magicos-train"
+  PUSHGATEWAY_NAMESPACE: "passos-magicos"
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -92,6 +95,9 @@ data:
   MONITORING_CLASS1_MIN: "0.10"
   MONITORING_CLASS1_MAX: "0.90"
   MONITORING_FAIL_ON_ALERT: "false"
+  PUSHGATEWAY_URL: "http://passos-magicos-pushgateway:9091"
+  PUSHGATEWAY_JOB_NAME: "passos-magicos-monitoring"
+  PUSHGATEWAY_NAMESPACE: "passos-magicos"
 
 ---
 apiVersion: batch/v1

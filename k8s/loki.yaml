@@ -1,0 +1,148 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passos-magicos-loki-config
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: loki
+data:
+  loki-config.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+
+    common:
+      path_prefix: /var/loki
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+
+    storage_config:
+      filesystem:
+        chunks_directory: /var/loki/chunks
+        rules_directory: /var/loki/rules
+
+    compactor:
+      working_directory: /var/loki/compactor
+
+    limits_config:
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+
+    query_range:
+      align_queries_with_step: true
+
+    analytics:
+      reporting_enabled: false
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: passos-magicos-loki-pvc
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: loki
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: passos-magicos-loki
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: loki
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: passos-magicos
+      component: loki
+  template:
+    metadata:
+      labels:
+        app: passos-magicos
+        component: loki
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:2.9.8
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/loki/loki-config.yaml
+          ports:
+            - name: http
+              containerPort: 3100
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+            - name: data
+              mountPath: /var/loki
+      volumes:
+        - name: config
+          configMap:
+            name: passos-magicos-loki-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: passos-magicos-loki-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: passos-magicos-loki
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: loki
+spec:
+  type: ClusterIP
+  selector:
+    app: passos-magicos
+    component: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: http

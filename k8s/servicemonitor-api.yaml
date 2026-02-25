@@ -1,0 +1,21 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: passos-magicos-api
+  namespace: mle-system
+  labels:
+    release: kps-r8pi
+    app: passos-magicos
+spec:
+  namespaceSelector:
+    matchNames:
+      - passos-magicos
+  selector:
+    matchLabels:
+      app: passos-magicos
+      component: api
+  endpoints:
+    - port: http
+      path: /metrics/prometheus
+      interval: 30s
+      scrapeTimeout: 10s

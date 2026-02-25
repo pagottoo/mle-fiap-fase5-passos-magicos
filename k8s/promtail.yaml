@@ -1,0 +1,215 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: passos-magicos-promtail
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: promtail
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: passos-magicos-promtail
+  labels:
+    app: passos-magicos
+    component: promtail
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: passos-magicos-promtail
+  labels:
+    app: passos-magicos
+    component: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: passos-magicos-promtail
+subjects:
+  - kind: ServiceAccount
+    name: passos-magicos-promtail
+    namespace: mle-system
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passos-magicos-promtail-config
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: promtail
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 3101
+      grpc_listen_port: 0
+
+    positions:
+      filename: /run/promtail/positions.yaml
+
+    clients:
+      - url: http://passos-magicos-loki.mle-system.svc.cluster.local:3100/loki/api/v1/push
+        external_labels:
+          cluster: passos-magicos
+
+    scrape_configs:
+      - job_name: passos-magicos-pods
+        kubernetes_sd_configs:
+          - role: pod
+        pipeline_stages:
+          - cri: {}
+          - json:
+              source: content
+              expressions:
+                level: level
+                service: service
+                component: component
+                event: event
+                trace_id: trace_id
+                run_id: run_id
+                model_version: model_version
+          - labels:
+              level:
+              service:
+              component:
+              event:
+        relabel_configs:
+          - action: keep
+            source_labels: [__meta_kubernetes_namespace]
+            regex: passos-magicos
+
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_label_component]
+            target_label: app_component
+
+          - action: replace
+            source_labels:
+              - __meta_kubernetes_pod_uid
+              - __meta_kubernetes_pod_container_name
+            separator: /
+            target_label: __path__
+            replacement: /var/log/pods/*$1/*.log
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: passos-magicos-promtail
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: promtail
+spec:
+  selector:
+    matchLabels:
+      app: passos-magicos
+      component: promtail
+  template:
+    metadata:
+      labels:
+        app: passos-magicos
+        component: promtail
+    spec:
+      serviceAccountName: passos-magicos-promtail
+      containers:
+        - name: promtail
+          image: grafana/promtail:2.9.8
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/promtail/promtail.yaml
+          ports:
+            - name: http-metrics
+              containerPort: 3101
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "400m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/promtail
+            - name: run
+              mountPath: /run/promtail
+            - name: pods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: docker-containers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: passos-magicos-promtail-config
+        - name: run
+          hostPath:
+            path: /run/promtail
+            type: DirectoryOrCreate
+        - name: pods
+          hostPath:
+            path: /var/log/pods
+            type: Directory
+        - name: docker-containers
+          hostPath:
+            path: /var/lib/docker/containers
+            type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: passos-magicos-promtail
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    component: promtail
+spec:
+  selector:
+    app: passos-magicos
+    component: promtail
+  ports:
+    - name: http-metrics
+      port: 3101
+      targetPort: http-metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: passos-magicos-promtail
+  namespace: mle-system
+  labels:
+    release: kps-r8pi
+    app: passos-magicos
+spec:
+  selector:
+    matchLabels:
+      app: passos-magicos
+      component: promtail
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

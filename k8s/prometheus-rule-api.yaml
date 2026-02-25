@@ -1,0 +1,50 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: passos-magicos-api
+  namespace: mle-system
+  labels:
+    release: kps-r8pi
+    app: passos-magicos
+spec:
+  groups:
+    - name: passos-magicos-api.rules
+      rules:
+        - alert: PassosMagicosApiHighErrorRate
+          expr: |
+            (
+              sum(rate(passos_magicos_api_requests_total{status_code=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(passos_magicos_api_requests_total[5m])), 1)
+            ) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+            team: mlops
+          annotations:
+            summary: "Passos Magicos API with high 5xx error rate"
+            description: "Error ratio > 5% over last 10 minutes."
+
+        - alert: PassosMagicosApiHighLatencyP95
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(passos_magicos_api_request_duration_seconds_bucket[5m]))
+            ) > 1
+          for: 10m
+          labels:
+            severity: warning
+            team: mlops
+          annotations:
+            summary: "Passos Magicos API high p95 latency"
+            description: "p95 latency is above 1 second for 10 minutes."
+
+        - alert: PassosMagicosApiModelNotLoaded
+          expr: avg_over_time(passos_magicos_api_model_loaded[5m]) < 1
+          for: 5m
+          labels:
+            severity: critical
+            team: mlops
+          annotations:
+            summary: "Passos Magicos API model not loaded"
+            description: "Model loaded gauge has been 0 for at least 5 minutes."

@@ -49,6 +49,11 @@ graph LR
 | `src/feature_store/*` | Feature Store offline (Parquet) + online (SQLite) |
 | `k8s/deployment.yaml` | Deploy da API e dashboard |
 | `k8s/cronjob-train.yaml` | CronJobs de treino e monitoramento |
+| `k8s/pushgateway.yaml` | Pushgateway para métricas dos CronJobs |
+| `k8s/loki.yaml` | Loki para armazenamento e consulta de logs |
+| `k8s/promtail.yaml` | Coleta de logs dos pods e envio para o Loki |
+| `k8s/grafana-datasource-loki.yaml` | Datasource Loki auto-provisionado no Grafana |
+| `k8s/grafana-dashboard-logs.yaml` | Dashboard inicial de logs no Grafana |
 | `.github/workflows/ci.yml` | Qualidade, testes e build de imagem |
 | `.github/workflows/cd.yml` | Build/push multi-arch + PR GitOps de release |
 | `.github/workflows/deploy-model.yml` | Promoção/rollback de modelo com PR GitOps para rollout |
@@ -179,6 +184,7 @@ Base: `.env.example`
 - `POST /predict`
 - `POST /predict/batch`
 - `GET /metrics`
+- `GET /metrics/prometheus`
 - `GET /features/status`
 - `GET /predict/aluno/{aluno_id}`
 - `GET /predict/alunos?aluno_ids=1,2,3`
@@ -261,6 +267,21 @@ Chaves recomendadas:
 - `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI`, `MLFLOW_MODEL_NAME`, `MLFLOW_MODEL_STAGE`
 - `ADMIN_RELOAD_TOKEN` (opcional)
 
+#### ConfigMaps dos CronJobs
+
+Além do `passos-magicos-config`, os jobs usam:
+
+- `passos-magicos-train-config`
+  - `TRAIN_*` (origem de dados/modelo)
+  - `PUSHGATEWAY_URL`
+  - `PUSHGATEWAY_JOB_NAME` (ex.: `passos-magicos-train`)
+  - `PUSHGATEWAY_NAMESPACE`
+- `passos-magicos-monitoring-config`
+  - `MONITORING_*` (janela/faixas/fail_on_alert)
+  - `PUSHGATEWAY_URL`
+  - `PUSHGATEWAY_JOB_NAME` (ex.: `passos-magicos-monitoring`)
+  - `PUSHGATEWAY_NAMESPACE`
+
 #### Secrets esperados
 
 | Secret | Uso | Chaves |
@@ -287,7 +308,18 @@ Notas:
 ```bash
 kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/cronjob-train.yaml
+kubectl apply -f k8s/pushgateway.yaml
+kubectl apply -f k8s/servicemonitor-api.yaml
+kubectl apply -f k8s/servicemonitor-pushgateway.yaml
+kubectl apply -f k8s/prometheus-rule-api.yaml
+kubectl apply -f k8s/prometheus-rule-mlops-jobs.yaml
+kubectl apply -f k8s/loki.yaml
+kubectl apply -f k8s/promtail.yaml
+kubectl apply -f k8s/grafana-datasource-loki.yaml
+kubectl apply -f k8s/grafana-dashboard-logs.yaml
 ```
+
+Observação: os arquivos de `ServiceMonitor`, `PrometheusRule`, datasource e dashboard usam o label `release: kps-r8pi`; ajuste para o release da sua stack de observabilidade se necessário.
 
 ### Argo CD
 
@@ -322,6 +354,22 @@ kubectl -n passos-magicos logs -f job/<job-name>
 kubectl -n passos-magicos port-forward svc/passos-magicos-api 8000:8000
 curl -s http://localhost:8000/health
 curl -s http://localhost:8000/metrics
+curl -s http://localhost:8000/metrics/prometheus | head -n 20
+```
+
+### Verificar métricas dos CronJobs (Pushgateway)
+
+```bash
+kubectl -n passos-magicos port-forward svc/passos-magicos-pushgateway 9091:9091
+curl -s http://localhost:9091/metrics | grep -E "passos_magicos_job_last_|passos_magicos_training_last_|passos_magicos_monitoring_last_"
+```
+
+### Verificar logs no Loki
+
+```bash
+kubectl -n mle-system port-forward svc/passos-magicos-loki 3100:3100
+curl -G -s "http://localhost:3100/loki/api/v1/query" \
+  --data-urlencode 'query={namespace="passos-magicos",service="passos-magicos"}' | jq .
 ```
 
 ### Promover modelo para produção via workflow

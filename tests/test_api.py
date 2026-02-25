@@ -138,6 +138,14 @@ class TestAPIEndpoints:
         assert "total_requests" in data
         assert "total_predictions" in data
 
+    def test_get_prometheus_metrics(self, client):
+        """Testa endpoint de métricas no formato Prometheus."""
+        response = client.get("/metrics/prometheus")
+
+        assert response.status_code == 200
+        assert "text/plain" in response.headers["content-type"]
+        assert "passos_magicos_api_requests_total" in response.text
+
 
 class TestAPIWithoutModel:
     """Testes para API sem modelo carregado."""

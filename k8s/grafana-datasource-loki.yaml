@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passos-magicos-grafana-datasource-loki
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    release: kps-r8pi
+    grafana_datasource: "1"
+data:
+  loki-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Passos Magicos Loki
+        uid: passos-magicos-loki
+        type: loki
+        access: proxy
+        url: http://passos-magicos-loki.mle-system.svc.cluster.local:3100
+        isDefault: false
+        editable: true
+        jsonData:
+          maxLines: 5000
+          timeout: 60
