@@ -43,7 +43,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: trainer
-              image: docker.io/pagottoo/passos-magicos-api:v0.0.3
+              image: docker.io/pagottoo/passos-magicos-api:v0.0.4
               imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args:
@@ -126,7 +126,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: monitoring
-              image: docker.io/pagottoo/passos-magicos-api:v0.0.3
+              image: docker.io/pagottoo/passos-magicos-api:v0.0.4
               imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args:
