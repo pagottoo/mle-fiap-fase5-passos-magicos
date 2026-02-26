@@ -127,7 +127,7 @@ class OfflineStore:
             DataFrame with dataset rows.
         """
         if dataset_name not in self._metadata["datasets"]:
-            raise ValueError(f"Dataset '{dataset_name}' not found")
+            raise ValueError(f"Dataset '{dataset_name}' não encontrado")
         
         dataset_meta = self._metadata["datasets"][dataset_name]
         
@@ -138,7 +138,7 @@ class OfflineStore:
                 None
             )
             if not version_meta:
-                raise ValueError(f"Version '{version}' not found")
+                raise ValueError(f"Versão '{version}' não encontrada")
         else:
             # Latest version
             version_meta = dataset_meta["versions"][-1]

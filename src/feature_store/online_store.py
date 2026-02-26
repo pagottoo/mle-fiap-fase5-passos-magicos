@@ -161,7 +161,7 @@ class OnlineStore:
         
         if not result:
             conn.close()
-            raise ValueError(f"Table '{table_name}' not found")
+            raise ValueError(f"Tabela '{table_name}' não encontrada")
         
         entity_column = result[0]
         

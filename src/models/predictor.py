@@ -126,7 +126,7 @@ class ModelPredictor:
             
             self.loaded_from = "mlflow"
         else:
-            raise ValueError(f"No version found for {self.mlflow_model_name} in {self.mlflow_stage}")
+            raise ValueError(f"Nenhuma versão encontrada para {self.mlflow_model_name} em {self.mlflow_stage}")
     
     def _load_from_file(self) -> None:
         """Load model and artifacts from local file."""

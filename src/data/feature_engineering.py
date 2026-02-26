@@ -243,7 +243,7 @@ class FeatureEngineer:
             Transformed DataFrame.
         """
         if not self._fitted:
-            raise ValueError("FeatureEngineer must be fitted before transform.")
+            raise ValueError("FeatureEngineer precisa ser ajustado antes de transformar.")
         
         df = self.encode_categorical(df, self._categorical_features, fit=False)
         df = self.scale_numeric(df, self._numeric_features, fit=False)

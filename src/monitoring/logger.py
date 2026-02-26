@@ -87,8 +87,6 @@ def get_logger(component: str | None = None, **context: Any):
     Return a structured logger with optional bound context.
     """
     logger = structlog.get_logger(component) if component else structlog.get_logger()
-    if component and "component" not in context:
-        context["component"] = component
     return logger.bind(**context) if context else logger
 
 

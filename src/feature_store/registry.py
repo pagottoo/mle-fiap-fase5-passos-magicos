@@ -2,6 +2,7 @@
 Feature Registry - feature definitions and metadata.
 """
 import json
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -295,8 +296,34 @@ class FeatureRegistry:
         return [self._features[name] for name in group.features if name in self._features]
     
     def get_features_by_tag(self, tag: str) -> List[FeatureDefinition]:
-        """Get features by tag."""
-        return [feat for feat in self._features.values() if tag in feat.tags]
+        """Get features by tag (supports PT/EN aliases)."""
+        alias_map = {
+            "indice": "index",
+            "indices": "index",
+            "index": "index",
+        }
+
+        def _normalize(value: str) -> str:
+            normalized = unicodedata.normalize("NFKD", value or "")
+            normalized = normalized.encode("ascii", "ignore").decode("ascii")
+            return normalized.strip().lower()
+
+        target_raw = _normalize(tag)
+        if not target_raw:
+            return []
+
+        target_canonical = alias_map.get(target_raw, target_raw)
+
+        matched: List[FeatureDefinition] = []
+        for feat in self._features.values():
+            for feat_tag in feat.tags:
+                feat_tag_raw = _normalize(feat_tag)
+                feat_tag_canonical = alias_map.get(feat_tag_raw, feat_tag_raw)
+                if feat_tag_raw == target_raw or feat_tag_canonical == target_canonical:
+                    matched.append(feat)
+                    break
+
+        return matched
     
     def list_features(self) -> List[str]:
         """List all feature names."""

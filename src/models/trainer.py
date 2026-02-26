@@ -114,7 +114,7 @@ class ModelTrainer:
         }
         
         if self.model_type not in models:
-            raise ValueError(f"Invalid model type: {self.model_type}")
+            raise ValueError(f"Tipo de modelo inválido: {self.model_type}")
         
         self.model = models[self.model_type]
         self.model_params = self._get_model_params()
@@ -463,7 +463,7 @@ class ModelTrainer:
             Markdown summary string.
         """
         summary = f"""
-## Model Summary
+## Resumo do Modelo / Model Summary
 
 **Model Type:** {self.model_type}
 **Version:** {MODEL_CONFIG["model_version"]}

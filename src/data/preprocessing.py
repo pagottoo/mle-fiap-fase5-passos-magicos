@@ -38,7 +38,7 @@ class DataPreprocessor:
         elif file_path.suffix in [".xlsx", ".xls"]:
             df = pd.read_excel(file_path)
         else:
-            raise ValueError(f"Unsupported file format: {file_path.suffix}")
+            raise ValueError(f"Formato de arquivo não suportado: {file_path.suffix}")
         
         logger.info("data_loaded", rows=len(df), columns=len(df.columns))
         return df
@@ -164,7 +164,7 @@ class DataPreprocessor:
             Transformed DataFrame.
         """
         if not self._fitted:
-            raise ValueError("DataPreprocessor must be fitted before transform.")
+            raise ValueError("DataPreprocessor precisa ser ajustado antes de transformar.")
         
         df = self.clean_data(df)
         df = self.handle_missing_values(df)
