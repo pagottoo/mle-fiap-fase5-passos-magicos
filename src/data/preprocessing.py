@@ -194,16 +194,84 @@ class DataPreprocessor:
 
         Args:
             file_path: Source data file.
-            year: Year suffix to process.
+            year: Year suffix to process (e.g. "2022") or "all" for multi-year.
 
         Returns:
             Prepared DataFrame.
         """
         logger.info("preparing_dataset", file_path=str(file_path), year=year)
         
+        if year == "all":
+            return self.prepare_multiyear_dataset(file_path)
+            
         df = self.load_data(file_path)
         df = self.filter_columns_by_year(df, year)
         df = self.fit_transform(df)
         
         logger.info("dataset_prepared", rows=len(df), columns=len(df.columns))
         return df
+
+    def prepare_multiyear_dataset(
+        self, 
+        file_path: Path, 
+        years: List[str] = ["2020", "2021", "2022"]
+    ) -> pd.DataFrame:
+        """
+        Prepare a normalized multi-year dataset (Long format).
+        Calculates evolution deltas between consecutive years.
+
+        Args:
+            file_path: Source data file.
+            years: List of years to stack.
+
+        Returns:
+            Stacked and normalized DataFrame.
+        """
+        logger.info("preparing_multiyear_dataset", years=years)
+        
+        df_raw = self.load_data(file_path)
+        all_years_data = []
+        
+        # Base columns that don't change or are identifiers (like NOME)
+        # We need NOME to track the same student across years
+        
+        for i, year in enumerate(years):
+            df_year = self.filter_columns_by_year(df_raw, year)
+            df_year["YEAR_REF"] = int(year)
+            
+            # Calculate deltas if not the first year
+            if i > 0:
+                prev_year = years[i-1]
+                df_prev = self.filter_columns_by_year(df_raw, prev_year)
+                
+                # Numeric columns to track evolution
+                numeric_cols = ["INDE", "IPV", "IAA", "IEG", "IPS", "IDA", "IPP", "IAN"]
+                
+                for col in numeric_cols:
+                    if col in df_year.columns and col in df_prev.columns:
+                        # Ensure numeric types
+                        curr_val = pd.to_numeric(df_year[col], errors="coerce")
+                        prev_val = pd.to_numeric(df_prev[col], errors="coerce")
+                        
+                        # Delta = Current - Previous
+                        df_year[f"{col}_delta"] = (curr_val - prev_val).fillna(0)
+                        
+                        # Velocity = Delta / Previous (percentage change)
+                        # Avoid division by zero
+                        df_year[f"{col}_velocity"] = (
+                            (curr_val - prev_val) / prev_val.replace(0, np.nan)
+                        ).fillna(0)
+            
+            all_years_data.append(df_year)
+            
+        # Stack all years
+        df_combined = pd.concat(all_years_data, axis=0, ignore_index=True)
+        
+        # Apply standard cleaning and imputation
+        df_combined = self.fit_transform(df_combined)
+        
+        logger.info("multiyear_dataset_prepared", 
+                    rows=len(df_combined), 
+                    columns=len(df_combined.columns))
+        
+        return df_combined

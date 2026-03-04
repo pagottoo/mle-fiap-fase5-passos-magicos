@@ -5,7 +5,7 @@ import os
 import joblib
 import json
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 from datetime import datetime
 
 import numpy as np
@@ -240,13 +240,14 @@ class ModelTrainer:
         
         return cv_results
     
-    def train(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, feature_names: Optional[List[str]] = None) -> None:
         """
         Train model.
 
         Args:
             X_train: Training features.
             y_train: Training target.
+            feature_names: Optional feature names for logging.
         """
         logger.info("training_model", samples=len(X_train))
         
@@ -257,24 +258,39 @@ class ModelTrainer:
                 "n_features": X_train.shape[1] if len(X_train.shape) > 1 else 1,
                 "positive_class_ratio": round(y_train.mean(), 4)
             })
+            
+            # Use mlflow.data if feature_names are available
+            if feature_names is not None:
+                try:
+                    df_train = pd.DataFrame(X_train, columns=feature_names)
+                    df_train["target"] = y_train
+                    self.tracker.log_training_dataset(df_train, name="passos_magicos_train", targets="target")
+                except Exception as e:
+                    logger.warning("dataset_log_failed", error=str(e))
         
         self.model.fit(X_train, y_train)
         
         # Extract feature importance when available
         if hasattr(self.model, "feature_importances_"):
-            self.feature_importance = dict(enumerate(self.model.feature_importances_))
+            self.feature_importance = {}
+            for idx, importance in enumerate(self.model.feature_importances_):
+                name = feature_names[idx] if feature_names and idx < len(feature_names) else f"feature_{idx}"
+                self.feature_importance[name] = float(importance)
             
             # Log feature importance to MLflow
             if self.mlflow_enabled and self.tracker:
-                for idx, importance in enumerate(self.model.feature_importances_):
-                    self.tracker.log_metric(f"feature_importance_{idx}", importance)
+                for name, importance in self.feature_importance.items():
+                    # Sanitize name for MLflow metric (alphanumeric, _, -, ., /, and space)
+                    safe_name = name.replace(" ", "_").replace("(", "").replace(")", "")
+                    self.tracker.log_metric(f"importance_{safe_name}", importance)
         
         logger.info("model_trained")
     
     def evaluate(
         self,
         X_test: np.ndarray,
-        y_test: np.ndarray
+        y_test: np.ndarray,
+        feature_names: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Evaluate model on test split.
@@ -282,6 +298,7 @@ class ModelTrainer:
         Args:
             X_test: Test features.
             y_test: Test target.
+            feature_names: Optional feature names.
 
         Returns:
             Evaluation metrics dictionary.
@@ -311,6 +328,31 @@ class ModelTrainer:
                 "roc_auc": self.metrics["roc_auc"],
                 "test_samples": len(X_test)
             })
+
+            # Use mlflow.evaluate for advanced insights if run is active
+            import mlflow
+            run_id = self.tracker.get_run_id()
+            if run_id:
+                try:
+                    # Create evaluation dataset
+                    df_test = pd.DataFrame(X_test, columns=feature_names) if feature_names else pd.DataFrame(X_test)
+                    df_test["label"] = y_test
+                    
+                    eval_data = mlflow.data.from_pandas(df_test, targets="label", name="passos_magicos_test")
+                    
+                    # Log evaluation artifacts (Confusion Matrix, ROC Curve, etc.)
+                    # Use nested=True because we are already inside a run
+                    with mlflow.start_run(run_id=run_id, nested=True):
+                        mlflow.models.evaluate(
+                            model=lambda X: self.model.predict(X),
+                            data=df_test,
+                            targets="label",
+                            model_type="classifier",
+                            dataset_path=None,  # Not needed for in-memory evaluation
+                            evaluators=["default"]
+                        )
+                except Exception as e:
+                    logger.warning("mlflow_evaluate_failed", error=str(e))
         
         logger.info("evaluation_complete", metrics=self.metrics)
         
