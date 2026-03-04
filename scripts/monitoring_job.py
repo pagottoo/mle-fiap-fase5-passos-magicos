@@ -254,6 +254,86 @@ def run_performance_check(api_url: str, class1_min: float, class1_max: float) ->
     return True
 
 
+def _trigger_github_workflow(reason: str, metadata: Dict[str, Any]) -> bool:
+    """Trigger a GitHub Action workflow via repository_dispatch."""
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    repo = os.getenv("GITHUB_REPO", "thiagopagotto/passos-magicos-mlops").strip()
+    
+    if not token:
+        logger.warning("github_retrain_trigger_skipped_no_token")
+        return False
+        
+    url = f"https://api.github.com/repos/{repo}/dispatches"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    payload = {
+        "event_type": "ml_drift_detected",
+        "client_payload": {
+            "reason": reason,
+            "metadata": metadata,
+            "timestamp": datetime.now().isoformat()
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        response.raise_for_status()
+        logger.info("github_retrain_workflow_triggered", repo=repo, reason=reason)
+        return True
+    except Exception as e:
+        logger.error("github_retrain_trigger_failed", error=str(e))
+        return False
+
+
+def _trigger_local_retraining() -> bool:
+    """Fallback: Run the training script locally."""
+    import subprocess
+    
+    train_script = Path(__file__).parent / "train_model.py"
+    logger.info("triggering_local_retraining", script=str(train_script))
+    
+    try:
+        # Run in background to not block monitoring job
+        subprocess.Popen(
+            [sys.executable, str(train_script), "--year", "all"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        return True
+    except Exception as e:
+        logger.error("local_retrain_trigger_failed", error=str(e))
+        return False
+
+
+def trigger_retraining(reason: str, metadata: Dict[str, Any]) -> bool:
+    """Determine best method to trigger retrain and execute it."""
+    logger.info("triggering_retrain_logic", reason=reason)
+    
+    # 1. Try GitHub Actions (Preferred for CI/CD)
+    if _trigger_github_workflow(reason, metadata):
+        _send_slack_alert(
+            title="Auto-Retraining Triggered (GitHub)",
+            message=f"A new training workflow was started on GitHub due to: {reason}",
+            severity="info"
+        )
+        return True
+        
+    # 2. Fallback to Local Execution
+    if _env_bool("ALLOW_LOCAL_AUTO_RETRAIN", False):
+        if _trigger_local_retraining():
+            _send_slack_alert(
+                title="Auto-Retraining Triggered (Local)",
+                message="Local training script started as fallback.",
+                severity="info"
+            )
+            return True
+            
+    return False
+
+
 def main() -> int:
     started_at = time.time()
     metrics_pusher = JobMetricsPusher(component="monitoring")
@@ -265,6 +345,7 @@ def main() -> int:
     class1_min = _env_float("MONITORING_CLASS1_MIN", 0.10)
     class1_max = _env_float("MONITORING_CLASS1_MAX", 0.90)
     fail_on_alert = _env_bool("MONITORING_FAIL_ON_ALERT", False)
+    auto_retrain = _env_bool("AUTO_RETRAIN_ON_DRIFT", True)
 
     logger.info(
         "monitoring_job_started",
@@ -273,26 +354,37 @@ def main() -> int:
         class1_min=class1_min,
         class1_max=class1_max,
         fail_on_alert=fail_on_alert,
+        auto_retrain=auto_retrain,
     )
 
     has_alert = False
     has_drift_alert = False
     has_distribution_alert = False
+    drift_metadata = {}
 
     try:
-        has_drift_alert = run_drift_check(window_size=window_size)
+        # Capture analysis for retrain logic
+        detector = DriftDetector(enable_alerts=False)
+        analysis = detector.analyze_recent_predictions(window_size=window_size)
+        
+        if "error" not in analysis:
+            has_drift_alert = bool(analysis.get("data_drift", {}).get("drift_detected", False)) or \
+                             bool(analysis.get("prediction_drift", {}).get("drift_detected", False))
+            drift_metadata = analysis
+            
+            if has_drift_alert:
+                logger.info("drift_detected_in_monitoring", window_size=window_size)
+                _send_slack_alert(
+                    title="Drift detected",
+                    message="Data drift and/or prediction drift was detected by scheduled monitoring.",
+                    metadata=_normalize_metadata(analysis.get("summary")),
+                    severity="warning",
+                )
+        
         has_alert = has_drift_alert or has_alert
     except Exception as exc:
-        logger.error(
-            "monitoring_drift_check_unexpected_error",
-            error=str(exc),
-            exc_info=True,
-        )
-        _send_system_alert(
-            title="Monitoring drift check failed",
-            message="Unexpected error while running drift check.",
-            metadata={"error": str(exc)},
-        )
+        logger.error("monitoring_drift_check_unexpected_error", error=str(exc), exc_info=True)
+        _send_system_alert(title="Monitoring drift check failed", message="Error during drift check.", metadata={"error": str(exc)})
         has_alert = True
 
     try:
@@ -303,31 +395,21 @@ def main() -> int:
         )
         has_alert = has_distribution_alert or has_alert
     except Exception as exc:
-        logger.error(
-            "monitoring_performance_check_unexpected_error",
-            error=str(exc),
-            exc_info=True,
-        )
-        _send_system_alert(
-            title="Monitoring performance check failed",
-            message="Unexpected error while running performance check.",
-            metadata={"error": str(exc)},
-        )
+        logger.error("monitoring_performance_check_unexpected_error", error=str(exc), exc_info=True)
         has_alert = True
+
+    # Closing the loop: Auto-Retraining
+    retrain_triggered = False
+    if auto_retrain and has_drift_alert:
+        retrain_triggered = trigger_retraining(
+            reason="detected_drift",
+            metadata={"drift_summary": drift_metadata.get("summary")}
+        )
 
     if has_alert and fail_on_alert:
         exit_code = 1
-        logger.warning(
-            "monitoring_job_completed_with_alerts_and_failed",
-            fail_on_alert=fail_on_alert,
-        )
     else:
         exit_code = 0
-        logger.info(
-            "monitoring_job_completed",
-            has_alert=has_alert,
-            fail_on_alert=fail_on_alert,
-        )
 
     duration = time.time() - started_at
     metrics_pusher.push_run_metrics(
@@ -337,8 +419,7 @@ def main() -> int:
         extra_metrics={
             "monitoring_last_alert_detected": 1.0 if has_alert else 0.0,
             "monitoring_last_drift_alert_detected": 1.0 if has_drift_alert else 0.0,
-            "monitoring_last_distribution_alert_detected": 1.0 if has_distribution_alert else 0.0,
-            "monitoring_last_fail_on_alert": 1.0 if fail_on_alert else 0.0,
+            "monitoring_auto_retrain_triggered": 1.0 if retrain_triggered else 0.0,
         },
     )
 

@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: passos-magicos-retrain-job
+  namespace: mlops
+  annotations:
+    # Esta anotação será alterada pelo GHA para forçar o ArgoCD a recriar o Job
+    mlops.passos-magicos/triggered-at: "placeholder"
+spec:
+  template:
+    spec:
+      containers:
+      - name: trainer
+        image: thiagopagotto/passos-magicos-api:latest # Usa a mesma imagem da API que contém os scripts
+        command: ["python", "scripts/train_model.py", "--year", "all", "--promote-to-staging"]
+        envFrom:
+        - configMapRef:
+            name: passos-magicos-config
+        - secretRef:
+            name: passos-magicos-secrets
+        env:
+        - name: TRAIN_DATA_SOURCE
+          value: "s3"
+      restartPolicy: Never
+  backoffLimit: 1
