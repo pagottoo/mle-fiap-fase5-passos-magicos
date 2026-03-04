@@ -46,12 +46,16 @@ class JobMetricsPusher:
         namespace: Optional[str] = None,
     ):
         self.component = component.strip().lower()
-        self.pushgateway_url = (pushgateway_url or os.getenv("PUSHGATEWAY_URL", "")).strip()
-        self.job_name = (
-            job_name
-            or os.getenv("PUSHGATEWAY_JOB_NAME", f"passos-magicos-{self.component}")
-        ).strip()
-        self.namespace = (namespace or os.getenv("PUSHGATEWAY_NAMESPACE", "")).strip()
+        
+        # Explicitly handle potential None from getenv to satisfy mypy
+        env_url = os.getenv("PUSHGATEWAY_URL") or ""
+        self.pushgateway_url = (pushgateway_url or env_url).strip()
+        
+        env_job = os.getenv("PUSHGATEWAY_JOB_NAME") or f"passos-magicos-{self.component}"
+        self.job_name = (job_name or env_job).strip()
+        
+        env_ns = os.getenv("PUSHGATEWAY_NAMESPACE") or ""
+        self.namespace = (namespace or env_ns).strip()
 
     @property
     def enabled(self) -> bool:

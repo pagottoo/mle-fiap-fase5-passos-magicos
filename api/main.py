@@ -888,7 +888,7 @@ if __name__ == "__main__":
     
     uvicorn.run(
         "api.main:app",
-        host=API_CONFIG["host"],
-        port=API_CONFIG["port"],
-        reload=API_CONFIG["debug"]
+        host=str(API_CONFIG["host"]),
+        port=int(API_CONFIG["port"]),
+        reload=bool(API_CONFIG["debug"])
     )

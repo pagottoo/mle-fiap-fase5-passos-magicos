@@ -165,6 +165,9 @@ class SlackChannel(AlertChannel):
             }
             
             data = json.dumps(payload).encode('utf-8')
+            if not self.webhook_url:
+                return False
+                
             req = urllib.request.Request(
                 self.webhook_url,
                 data=data,
@@ -204,6 +207,9 @@ class WebhookChannel(AlertChannel):
         
         try:
             data = json.dumps(alert.to_dict()).encode('utf-8')
+            if not self.webhook_url:
+                return False
+                
             req = urllib.request.Request(
                 self.webhook_url,
                 data=data,

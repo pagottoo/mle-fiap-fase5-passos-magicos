@@ -73,7 +73,7 @@ jobs:
       
       - name: Type check with mypy
         run: |
-          mypy src/ api/ scripts/ --ignore-missing-imports --no-error-summary --exit-zero
+          mypy src/ api/ scripts/ --config-file pyproject.toml || true
 
   # ==================== Test ====================
   test:
