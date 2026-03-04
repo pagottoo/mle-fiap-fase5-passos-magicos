@@ -111,10 +111,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          mkdir -p mlruns
+          mkdir -p mlruns models logs feature_store/online
       
       - name: Check model versions
         id: check
+        env:
+          PYTHONPATH: .
         run: |
           python scripts/ops/model_lifecycle.py --action check --model-name "${{ inputs.model_name }}" >> $GITHUB_OUTPUT
       
@@ -154,9 +156,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          mkdir -p mlruns
+          mkdir -p mlruns models logs feature_store/online
 
       - name: Promote to Staging
+        env:
+          PYTHONPATH: .
         run: |
           python scripts/ops/model_lifecycle.py \
             --action promote \
@@ -202,9 +206,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          mkdir -p mlruns
+          mkdir -p mlruns models logs feature_store/online
       
       - name: Promote to Production
+        env:
+          PYTHONPATH: .
         run: |
           python scripts/ops/model_lifecycle.py \
             --action promote \
@@ -314,9 +320,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          mkdir -p mlruns
+          mkdir -p mlruns models logs feature_store/online
       
       - name: Perform Rollback
+        env:
+          PYTHONPATH: .
         run: |
           python scripts/ops/model_lifecycle.py \
             --action promote \
