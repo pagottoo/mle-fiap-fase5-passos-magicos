@@ -33,10 +33,23 @@ class TestModelPredictor:
         predictor.model.predict.return_value = np.array([1])
         predictor.model.predict_proba.return_value = np.array([[0.1, 0.9]])
         predictor.loaded_from = "local"
-        predictor.artifacts = {"model_type": "random_forest", "version": "1.0.0", "trained_at": "now"}
+        predictor.artifacts = {
+            "model_type": "random_forest", 
+            "version": "1.0.0", 
+            "trained_at": "2026-03-03",
+            "metrics": {"f1_score": 0.92}
+        }
+        
+        # Mock feature engineer
         predictor.feature_engineer = MagicMock()
         predictor.feature_engineer.feature_names = ["F1", "F2"]
         predictor.feature_engineer.get_feature_matrix.return_value = (np.array([[0.1, 0.2]]), None)
+        predictor.feature_engineer.transform.side_effect = lambda df: df
+        
+        # Mock preprocessor
+        predictor.preprocessor = MagicMock()
+        predictor.preprocessor.handle_missing_values.side_effect = lambda df: df
+        
         predictor.explainer = MagicMock()
         predictor.explainer.shap_values.return_value = [np.array([[0.1, 0.2]]), np.array([[0.3, 0.4]])]
         predictor.explainer.expected_value = [0.5, 0.5]

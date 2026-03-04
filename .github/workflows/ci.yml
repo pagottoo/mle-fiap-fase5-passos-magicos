@@ -73,8 +73,7 @@ jobs:
       
       - name: Type check with mypy
         run: |
-          mypy src/ --ignore-missing-imports --no-error-summary
-        continue-on-error: true
+          mypy src/ api/ scripts/ --ignore-missing-imports --no-error-summary --exit-zero
 
   # ==================== Test ====================
   test:
