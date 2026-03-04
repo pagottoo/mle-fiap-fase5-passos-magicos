@@ -5,29 +5,60 @@ import pytest
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from src.models.predictor import ModelPredictor
 from src.config import MODELS_DIR, MODEL_CONFIG
 
 
 class TestModelPredictor:
-    """Testes para ModelPredictor com modelo real."""
+    """Testes para ModelPredictor."""
     
     @pytest.fixture
     def model_path(self):
-        """Retorna o caminho do modelo real."""
+        """Retorna o caminho do modelo real ou None."""
         path = MODELS_DIR / f"{MODEL_CONFIG['model_name']}_latest.joblib"
-        if not path.exists():
-            pytest.skip("Modelo não encontrado - execute treinamento primeiro")
-        return path
+        return path if path.exists() else None
     
     @pytest.fixture
-    def predictor(self, model_path):
-        """Cria instância do predictor com modelo real."""
-        return ModelPredictor(model_path=model_path)
+    def predictor(self, model_path, monkeypatch):
+        """Cria instância do predictor (real ou mockado)."""
+        if model_path:
+            return ModelPredictor(model_path=model_path)
+        
+        # CI environment or no model: Mock it
+        monkeypatch.setattr(ModelPredictor, "_load_model", lambda x: None)
+        predictor = ModelPredictor()
+        predictor.model = MagicMock()
+        predictor.model.predict.return_value = np.array([1])
+        predictor.model.predict_proba.return_value = np.array([[0.1, 0.9]])
+        predictor.loaded_from = "local"
+        predictor.artifacts = {
+            "model_type": "random_forest", 
+            "version": "1.0.0", 
+            "trained_at": "2026-03-03",
+            "metrics": {"f1_score": 0.92}
+        }
+        
+        # Mock feature engineer
+        predictor.feature_engineer = MagicMock()
+        predictor.feature_engineer.feature_names = ["F1", "F2"]
+        predictor.feature_engineer.get_feature_matrix.return_value = (np.array([[0.1, 0.2]]), None)
+        predictor.feature_engineer.transform.side_effect = lambda df: df
+        
+        # Mock preprocessor
+        predictor.preprocessor = MagicMock()
+        predictor.preprocessor.handle_missing_values.side_effect = lambda df: df
+        
+        predictor.explainer = MagicMock()
+        predictor.explainer.shap_values.return_value = [np.array([[0.1, 0.2]]), np.array([[0.3, 0.4]])]
+        predictor.explainer.expected_value = [0.5, 0.5]
+        return predictor
     
     def test_load_model_from_file(self, model_path):
         """Testa carregamento de modelo de arquivo local."""
+        if not model_path:
+            pytest.skip("No real model for load test")
         predictor = ModelPredictor(model_path=model_path)
         
         assert predictor.loaded_from == "local"
@@ -35,10 +66,11 @@ class TestModelPredictor:
         assert predictor.artifacts is not None
         assert predictor.artifacts["model_type"] == "random_forest"
     
-    def test_load_model_file_not_found(self, tmp_path):
+    def test_load_model_file_not_found(self, tmp_path, monkeypatch):
         """Testa erro quando arquivo de modelo não existe."""
+        # Forçar falha real no construtor
         fake_path = tmp_path / "nonexistent_model.joblib"
-        
+        # Garantir que _load_model tente carregar
         with pytest.raises(FileNotFoundError):
             ModelPredictor(model_path=fake_path)
     

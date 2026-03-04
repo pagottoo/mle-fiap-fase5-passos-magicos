@@ -14,8 +14,10 @@ LOGS_DIR = BASE_DIR / "logs"
 MODELS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
+from typing import Dict, Any, List
+
 # Model configuration
-MODEL_CONFIG = {
+MODEL_CONFIG: Dict[str, Any] = {
     "model_name": "ponto_virada_model",
     "model_version": "1.0.0",
     "random_state": 42,
@@ -24,10 +26,10 @@ MODEL_CONFIG = {
 }
 
 # Model target
-TARGET_COLUMN = "ponto_virada_pred"
+TARGET_COLUMN: str = "ponto_virada_pred"
 
 # Main numeric features (evaluation indexes)
-NUMERIC_FEATURES = [
+NUMERIC_FEATURES: List[str] = [
     "INDE",  # Educational Development Index
     "IAA",   # Self-Assessment Index
     "IEG",   # Engagement Index
@@ -39,7 +41,7 @@ NUMERIC_FEATURES = [
 ]
 
 # Categorical columns
-CATEGORICAL_FEATURES = [
+CATEGORICAL_FEATURES: List[str] = [
     "INSTITUICAO_ENSINO_ALUNO",
     "FASE",
     "PEDRA",
@@ -47,20 +49,20 @@ CATEGORICAL_FEATURES = [
 ]
 
 # API configuration
-API_CONFIG = {
+API_CONFIG: Dict[str, Any] = {
     "host": os.getenv("API_HOST", "0.0.0.0"),
     "port": int(os.getenv("API_PORT", 8000)),
     "debug": os.getenv("API_DEBUG", "false").lower() == "true",
 }
 
 # Logging configuration
-LOG_CONFIG = {
+LOG_CONFIG: Dict[str, Any] = {
     "level": os.getenv("LOG_LEVEL", "INFO"),
     "format": "json",
 }
 
 # Monitoring configuration
-MONITORING_CONFIG = {
+MONITORING_CONFIG: Dict[str, Any] = {
     "drift_threshold": 0.1,
     "performance_window": 1000,  # Number of predictions used for metrics
 }

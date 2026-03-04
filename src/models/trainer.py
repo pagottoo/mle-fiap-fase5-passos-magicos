@@ -55,7 +55,7 @@ class ModelTrainer:
     def __init__(
         self,
         model_type: str = "random_forest",
-        random_state: int = MODEL_CONFIG["random_state"],
+        random_state: Optional[int] = None,
         experiment_name: str = "passos-magicos-ponto-virada",
         enable_mlflow: bool = True
     ):
@@ -69,15 +69,15 @@ class ModelTrainer:
             enable_mlflow: Enable MLflow tracking.
         """
         self.model_type = model_type
-        self.random_state = random_state
-        self.model = None
-        self.metrics = {}
-        self.feature_importance = {}
-        self.cv_results = {}
+        self.random_state = random_state if random_state is not None else int(MODEL_CONFIG["random_state"])
+        self.model: Any = None
+        self.metrics: Dict[str, Any] = {}
+        self.feature_importance: Dict[str, float] = {}
+        self.cv_results: Dict[str, Any] = {}
         
         # MLflow integration
         self.mlflow_enabled = enable_mlflow and MLFLOW_AVAILABLE
-        self.tracker = None
+        self.tracker: Optional[ExperimentTracker] = None
         self.model_registry = None
         self.run_id = None
         

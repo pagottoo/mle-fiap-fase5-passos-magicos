@@ -42,15 +42,17 @@ graph LR
 
 | Componente | Papel |
 |---|---|
-| `api/main.py` | API de predição, métricas, endpoints de alerta e reload de modelo |
+| `api/main.py` | API de predição, métricas, **explicação (XAI/SHAP)** e reload de modelo |
 | `scripts/train_model.py` | Pipeline de treino (local/S3), registro no MLflow e promoção para Staging |
 | `src/data/preprocessing.py` | Normalização de dados (Wide-to-Long) e suporte multi-ano |
 | `src/data/feature_engineering.py` | Criação de features de evolução (Deltas e Velocidade) |
-| `scripts/monitoring_job.py` | Job in-cluster para drift/performance + envio direto para Slack |
-| `src/mlflow_tracking/*` | Tracking de experimentos e registry com estratégia por alias |
+| `scripts/monitoring_job.py` | Monitoramento de drift + **Gatilho de Retreino Automático (CML)** |
+| `scripts/ops/model_lifecycle.py` | Utilitário consolidado para gestão de versões no MLflow (usado pelo CI/CD) |
+| `src/mlflow_tracking/*` | Tracking de experimentos com **rastreio de datasets e auto-evaluation** |
 | `src/feature_store/*` | Feature Store offline (Parquet) + online (SQLite) |
 | `k8s/deployment.yaml` | Deploy da API e dashboard |
-| `k8s/cronjob-train.yaml` | CronJobs de treino e monitoramento |
+| `k8s/retrain-job.yaml` | Job Kubernetes disparado via GitOps para retreino automático |
+| `k8s/cronjob-train.yaml` | CronJobs de treino e monitoramento agendados |
 | `k8s/pushgateway.yaml` | Pushgateway para métricas dos CronJobs |
 | `k8s/loki.yaml` | Loki para armazenamento e consulta de logs |
 | `k8s/promtail.yaml` | Coleta de logs dos pods e envio para o Loki |
@@ -102,16 +104,23 @@ A API carrega modelo por estratégia de runtime:
 
 Para MLflow, o stage configurado em `MLFLOW_MODEL_STAGE` é resolvido para alias (`@production` / `@staging`).
 
-### 3) Monitoramento
+### 3) Monitoramento e Continuous Machine Learning (CML)
 
-O job `scripts/monitoring_job.py` executa dois checks:
+O sistema implementa um loop de retreino automático guiado por dados:
 
-1. **Prediction drift** com base em `logs/predictions.jsonl`.
-2. **Distribuição de classes** consultando `GET /metrics` da API.
+1. **Detecção:** O job `scripts/monitoring_job.py` analisa o drift de dados e predições.
+2. **Gatilho (GitOps):** Se o drift ultrapassar o threshold, o Job dispara um evento para o GitHub Actions.
+3. **Orquestração:** O workflow no GHA realiza um commit no arquivo `k8s/retrain-job.yaml` atualizando o timestamp de trigger.
+4. **Execução:** O **Argo CD** detecta a mudança e cria um `Job` no Kubernetes para executar o retreino no hardware local (homelab).
+5. **Fechamento:** O novo modelo é registrado no MLflow e promovido para `Staging` automaticamente.
 
-Se houver anomalia, envia alerta direto para Slack via `SLACK_WEBHOOK_URL`.
+### 4) Explicabilidade (XAI)
 
-### 4) Deploy e GitOps
+A API e o Dashboard agora suportam análise de "caixa-preta" via **SHAP**:
+- **Endpoint:** `POST /predict/explain` retorna os fatores que mais influenciaram a decisão para aquele aluno.
+- **Visualização:** Gráfico de barras no Streamlit indicando impactos positivos (verde) e negativos (vermelho) para o Ponto de Virada.
+
+### 5) Deploy e GitOps
 
 - `cd.yml` gera imagens (`api` e `dashboard`), push no Docker Hub e abre PR atualizando manifests em `k8s/`.
 - Argo CD sincroniza o cluster após merge.
