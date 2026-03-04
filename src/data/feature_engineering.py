@@ -90,22 +90,22 @@ class FeatureEngineer:
         logger.info("selecting_features")
         
         # Main numeric features (evaluation indexes)
-        # NOTA_PORT, NOTA_MAT, NOTA_ING removed because they are absent in the current dataset
-        numeric_candidates = [
+        # Includes new evolution features calculated in multi-year mode
+        numeric_features = [
             "INDE", "IAA", "IEG", "IPS", "IDA", "IPP", "IPV", "IAN",
-            "IDADE_ALUNO", "ANOS_PM"
+            "IDADE_ALUNO", "ANOS_PM", "YEAR_REF",
+            "INDE_delta", "INDE_velocity",
+            "IPV_delta", "IPV_velocity",
+            "IAA_delta", "IAA_velocity",
+            "IEG_delta", "IEG_velocity",
+            "IPS_delta", "IDA_delta", "IPP_delta", "IAN_delta"
         ]
         
         # Main categorical features
-        # PONTO_VIRADA removed to avoid data leakage (target is derived from it)
-        categorical_candidates = [
+        categorical_features = [
             "INSTITUICAO_ENSINO_ALUNO", "FASE", "PEDRA",
             "BOLSISTA", "SINALIZADOR_INGRESSANTE"
         ]
-        
-        # Keep only existing columns
-        numeric_features = [c for c in numeric_candidates if c in df.columns]
-        categorical_features = [c for c in categorical_candidates if c in df.columns]
         
         logger.info(
             "features_selected",
@@ -137,8 +137,9 @@ class FeatureEngineer:
         df = df.copy()
         
         for col in categorical_features:
+            # Ensure column exists for encoding, even if filled with "None"
             if col not in df.columns:
-                continue
+                df[col] = "None"
                 
             if fit:
                 le = LabelEncoder()
@@ -154,6 +155,9 @@ class FeatureEngineer:
                     df[f"{col}_encoded"] = df[col].apply(
                         lambda x: le.transform([x])[0] if x in le.classes_ else -1
                     )
+                else:
+                    # Column not fitted, return -1
+                    df[f"{col}_encoded"] = -1
         
         return df
     
@@ -178,27 +182,19 @@ class FeatureEngineer:
         
         df = df.copy()
         
-        # Convert columns to numeric
+        # Ensure all columns exist and are numeric
         for col in numeric_features:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        
-        # Keep only existing features
-        existing_features = [c for c in numeric_features if c in df.columns]
-        
-        if not existing_features:
-            return df
-        
-        # Fill NaN with 0 before scaling
-        df[existing_features] = df[existing_features].fillna(0)
+            if col not in df.columns:
+                df[col] = 0.0
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
         
         if fit:
-            scaled_values = self.scaler.fit_transform(df[existing_features])
+            scaled_values = self.scaler.fit_transform(df[numeric_features])
         else:
-            scaled_values = self.scaler.transform(df[existing_features])
+            scaled_values = self.scaler.transform(df[numeric_features])
         
         # Create scaled columns
-        for i, col in enumerate(existing_features):
+        for i, col in enumerate(numeric_features):
             df[f"{col}_scaled"] = scaled_values[:, i]
         
         return df
@@ -215,16 +211,18 @@ class FeatureEngineer:
         """
         logger.info("fitting_feature_engineer")
         
+        # Select numeric and categorical candidates
         self._numeric_features, self._categorical_features = self.select_features(df)
         
         # Fit encoders and scaler
         df = self.encode_categorical(df, self._categorical_features, fit=True)
         df = self.scale_numeric(df, self._numeric_features, fit=True)
         
-        # Save final feature names
+        # Save final feature names in a consistent order
+        # Important: use all requested features to ensure consistency between training and inference
         self._feature_names = (
-            [f"{c}_scaled" for c in self._numeric_features if c in df.columns] +
-            [f"{c}_encoded" for c in self._categorical_features if c in df.columns]
+            [f"{c}_scaled" for c in self._numeric_features] +
+            [f"{c}_encoded" for c in self._categorical_features]
         )
         
         self._fitted = True

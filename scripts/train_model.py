@@ -64,8 +64,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--year",
-        default=os.getenv("TRAIN_DATA_YEAR", "2022"),
-        help="Year suffix used during preprocessing",
+        default=os.getenv("TRAIN_DATA_YEAR", "all"),
+        help="Year suffix used during preprocessing (e.g. 2022) or 'all' for multi-year",
     )
     parser.add_argument(
         "--model-type",
@@ -284,8 +284,8 @@ def main():
         )
 
         logger.info("training_step_started", step="final_training", step_order="5/7")
-        trainer.train(X_train, y_train)
-        train_metrics = trainer.evaluate(X_test, y_test)
+        trainer.train(X_train, y_train, feature_names=feature_engineer.feature_names)
+        train_metrics = trainer.evaluate(X_test, y_test, feature_names=feature_engineer.feature_names)
         logger.info(
             "training_step_completed",
             step="final_training",

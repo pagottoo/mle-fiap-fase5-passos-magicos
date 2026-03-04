@@ -164,9 +164,27 @@ class ModelPredictor:
         # Convert to DataFrame
         df = pd.DataFrame([data])
 
+        # Add default values for new multi-year features if they are missing
+        # This ensures compatibility with single-year or manual inputs (fixes tests)
+        evolution_features = [
+            "YEAR_REF", "INDE_delta", "INDE_velocity", 
+            "IPV_delta", "IPV_velocity", "IAA_delta", "IAA_velocity",
+            "IEG_delta", "IEG_velocity", "IPS_delta", "IDA_delta", 
+            "IPP_delta", "IAN_delta", "IDADE_ALUNO", "ANOS_PM"
+        ]
+        
+        for feat in evolution_features:
+            if feat not in df.columns:
+                if feat == "YEAR_REF":
+                    df[feat] = 2022  # Default reference year
+                else:
+                    df[feat] = 0.0  # Default for deltas and missing numeric
+
         # Apply fitted transforms when available
-        if self.preprocessor and self.feature_engineer:
+        if self.preprocessor:
             df = self.preprocessor.handle_missing_values(df)
+            
+        if self.feature_engineer:
             df = self.feature_engineer.transform(df)
         
         return df
@@ -183,13 +201,13 @@ class ModelPredictor:
         """
         logger.info("making_prediction", input_data=data)
         
+        # Preprocess input (adds missing features and applies transforms)
+        df = self.preprocess_input(data)
+        
         # MLflow-loaded models may already receive processed features
-        if self.loaded_from == "mlflow" or (not self.preprocessor or not self.feature_engineer):
-            # Convert input to numpy directly
-            df = pd.DataFrame([data])
+        if self.loaded_from == "mlflow" or (not self.feature_engineer):
             X = df.values
         else:
-            df = self.preprocess_input(data)
             X, _ = self.feature_engineer.get_feature_matrix(df)
         
         prediction = int(self.model.predict(X)[0])

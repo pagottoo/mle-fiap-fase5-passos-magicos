@@ -44,6 +44,8 @@ graph LR
 |---|---|
 | `api/main.py` | API de predição, métricas, endpoints de alerta e reload de modelo |
 | `scripts/train_model.py` | Pipeline de treino (local/S3), registro no MLflow e promoção para Staging |
+| `src/data/preprocessing.py` | Normalização de dados (Wide-to-Long) e suporte multi-ano |
+| `src/data/feature_engineering.py` | Criação de features de evolução (Deltas e Velocidade) |
 | `scripts/monitoring_job.py` | Job in-cluster para drift/performance + envio direto para Slack |
 | `src/mlflow_tracking/*` | Tracking de experimentos e registry com estratégia por alias |
 | `src/feature_store/*` | Feature Store offline (Parquet) + online (SQLite) |
@@ -77,7 +79,9 @@ Makefile                # Atalhos de setup, treino, testes e execução local
 ### 1) Treinamento
 
 1. CronJob `passos-magicos-train` baixa dataset do S3.
-2. Preprocessa dados e faz feature engineering.
+2. Preprocessa dados e faz feature engineering:
+   - **Modo Multi-Ano:** O pipeline agora empilha dados de múltiplos anos para aumentar o volume de treino.
+   - **Features de Evolução:** Calcula-se automaticamente o *Delta* e a *Velocidade* de crescimento dos índices (INDE, IPV, etc.) entre anos consecutivos.
 3. Treina modelo (`random_forest` por padrão).
 4. Registra experimento e modelo no MLflow.
 5. Promove versão mais recente para alias `staging`.
@@ -87,7 +91,7 @@ Schedule atual (`k8s/cronjob-train.yaml`):
 - treino: `0 6 * * 1` (semanal)
 - monitoramento: `0 */6 * * *` (a cada 6h)
 
-Observação: o timezone do CronJob depende do timezone do cluster (normalmente UTC).
+Observação: o modo de treino padrão para a flag `--year` é `all` (`--year all`) para aproveitar o máximo dos dados.
 
 ### 2) Serving
 
