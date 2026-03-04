@@ -9,6 +9,8 @@
 name: Model Deployment
 
 on:
+  repository_dispatch:
+    types: [ml_drift_detected]
   workflow_dispatch:
     inputs:
       action:
@@ -49,9 +51,45 @@ env:
   MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
 
 jobs:
+  # ==================== Auto-Retraining (GitOps Trigger) ====================
+  auto-retrain:
+    name: Trigger Retrain via GitOps
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'ml_drift_detected'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      
+      - name: Update Retrain Manifest (GitOps Trigger)
+        env:
+          TRIGGER_TIME: ${{ github.event.client_payload.timestamp }}
+        run: |
+          echo "Drift detected at: ${TRIGGER_TIME}"
+          # Update timestamp to force ArgoCD to recreate the Job
+          sed -i "s|mlops.passos-magicos/triggered-at: \".*\"|mlops.passos-magicos/triggered-at: \"${TRIGGER_TIME}\"|g" k8s/retrain-job.yaml
+          
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git add k8s/retrain-job.yaml
+          git commit -m "chore(mlops): trigger auto-retrain due to drift detection"
+          git push
+      
+      - name: GitOps Retrain Summary
+        run: |
+          echo "## Auto-Retraining Triggered (GitOps)" >> $GITHUB_STEP_SUMMARY
+          echo "Commit enviado ao Git para disparar o Job de retreino no Kubernetes via Argo CD." >> $GITHUB_STEP_SUMMARY
+          echo "Motivo: \`${{ github.event.client_payload.reason }}\`" >> $GITHUB_STEP_SUMMARY
+
   # ==================== Validate ====================
   validate:
     name: Validate Model
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     
     outputs:
@@ -78,49 +116,7 @@ jobs:
       - name: Check model versions
         id: check
         run: |
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          
-          from src.mlflow_tracking import ModelRegistry
-          
-          model_name = '${{ inputs.model_name }}'
-          specified_version = '${{ inputs.version }}'
-          
-          registry = ModelRegistry()
-          
-          # Pegar versões atuais
-          prod_version = registry.get_production_version(model_name)
-          staging_version = registry.get_staging_version(model_name)
-          
-          prod_v = prod_version.version if prod_version else 'None'
-          staging_v = staging_version.version if staging_version else 'None'
-          
-          # Determinar versão alvo
-          if specified_version:
-              target_v = specified_version
-          elif staging_version:
-              target_v = staging_version.version
-          else:
-              target_v = 'None'
-          
-          print(f'Current Production: v{prod_v}')
-          print(f'Current Staging: v{staging_v}')
-          print(f'Target Version: v{target_v}')
-          
-          with open('versions.txt', 'w') as f:
-              f.write(f'production_version={prod_v}\\n')
-              f.write(f'staging_version={staging_v}\\n')
-              f.write(f'target_version={target_v}\\n')
-          " 2>/dev/null || echo "No existing versions found"
-          
-          if [ -f versions.txt ]; then
-            cat versions.txt >> $GITHUB_OUTPUT
-          else
-            echo "production_version=None" >> $GITHUB_OUTPUT
-            echo "staging_version=None" >> $GITHUB_OUTPUT
-            echo "target_version=None" >> $GITHUB_OUTPUT
-          fi
+          python scripts/ops/model_lifecycle.py --action check --model-name "${{ inputs.model_name }}" >> $GITHUB_OUTPUT
       
       - name: Validation Summary
         run: |
@@ -162,27 +158,11 @@ jobs:
 
       - name: Promote to Staging
         run: |
-          echo "Promoting model to Staging..."
-
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-
-          from src.mlflow_tracking import ModelRegistry
-
-          model_name = '${{ inputs.model_name }}'
-          version = '${{ needs.validate.outputs.target_version }}'
-
-          if version == 'None':
-              print('No version to promote')
-              sys.exit(1)
-
-          registry = ModelRegistry()
-
-          print(f'Promoting {model_name} v{version} to Staging')
-          registry.promote_to_staging(model_name, int(version))
-          print('Model promoted to Staging')
-          "
+          python scripts/ops/model_lifecycle.py \
+            --action promote \
+            --model-name "${{ inputs.model_name }}" \
+            --version "${{ needs.validate.outputs.target_version }}" \
+            --stage "Staging"
 
       - name: Staging Summary
         run: |
@@ -226,27 +206,11 @@ jobs:
       
       - name: Promote to Production
         run: |
-          echo "Promoting model to Production..."
-          
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          
-          from src.mlflow_tracking import ModelRegistry
-          
-          model_name = '${{ inputs.model_name }}'
-          version = '${{ needs.validate.outputs.target_version }}'
-          
-          if version == 'None':
-              print('No version to promote')
-              sys.exit(1)
-          
-          registry = ModelRegistry()
-          
-          print(f'Promoting {model_name} v{version} to Production')
-          registry.promote_to_production(model_name, int(version))
-          print('Model promoted to Production')
-          "
+          python scripts/ops/model_lifecycle.py \
+            --action promote \
+            --model-name "${{ inputs.model_name }}" \
+            --version "${{ needs.validate.outputs.target_version }}" \
+            --stage "Production"
 
       - name: Update API reload annotation (GitOps)
         env:
@@ -354,27 +318,11 @@ jobs:
       
       - name: Perform Rollback
         run: |
-          echo "Rolling back model..."
-          
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          
-          from src.mlflow_tracking import ModelRegistry
-          
-          model_name = '${{ inputs.model_name }}'
-          target_version = '${{ inputs.version }}'
-          
-          if not target_version:
-              print('Version required for rollback')
-              sys.exit(1)
-          
-          registry = ModelRegistry()
-          
-          print(f'Rolling back to {model_name} v{target_version}')
-          registry.promote_to_production(model_name, int(target_version))
-          print('Rollback complete')
-          "
+          python scripts/ops/model_lifecycle.py \
+            --action promote \
+            --model-name "${{ inputs.model_name }}" \
+            --version "${{ inputs.version }}" \
+            --stage "Production"
 
       - name: Update API reload annotation (GitOps)
         env:
@@ -449,17 +397,18 @@ jobs:
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [validate, deploy-staging, deploy-production, rollback]
+    needs: [auto-retrain, validate, deploy-staging, deploy-production, rollback]
     if: always()
     
     steps:
       - name: Send notification
         run: |
-          echo "## Deployment Notification" >> $GITHUB_STEP_SUMMARY
+          echo "## Pipeline Notification" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Stage | Status | GitOps PR |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Validate | ${{ needs.validate.result }} | - |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy Staging | ${{ needs.deploy-staging.result }} | - |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy Production | ${{ needs.deploy-production.result }} | ${{ needs.deploy-production.outputs.gitops_pr_url || '-' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Rollback | ${{ needs.rollback.result }} | ${{ needs.rollback.outputs.gitops_pr_url || '-' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Auto-Retrain (Drift) | ${{ needs.auto-retrain.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validate | ${{ needs.validate.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Staging | ${{ needs.deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Production | ${{ needs.deploy-production.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rollback | ${{ needs.rollback.result }} |" >> $GITHUB_STEP_SUMMARY
