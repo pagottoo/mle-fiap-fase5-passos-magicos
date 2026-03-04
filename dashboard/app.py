@@ -197,6 +197,79 @@ else:
 
 st.markdown("---")
 
+# Explicabilidade do Modelo (XAI)
+st.header("Análise de Decisão (SHAP)")
+st.markdown("Veja quais fatores estão influenciando a predição para um aluno específico.")
+
+with st.expander("Simular Aluno e Explicar Predição"):
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        inde = st.number_input("INDE", 0.0, 10.0, 7.5)
+        iaa = st.number_input("IAA", 0.0, 10.0, 8.0)
+        ieg = st.number_input("IEG", 0.0, 10.0, 7.0)
+        ips = st.number_input("IPS", 0.0, 10.0, 6.5)
+        
+    with col2:
+        ida = st.number_input("IDA", 0.0, 10.0, 7.2)
+        ipp = st.number_input("IPP", 0.0, 10.0, 6.8)
+        ipv = st.number_input("IPV", 0.0, 10.0, 7.5)
+        ian = st.number_input("IAN", 0.0, 10.0, 5.0)
+        
+    with col3:
+        fase = st.selectbox("FASE", ["0", "1", "2", "3", "4", "5", "6", "7", "8"])
+        pedra = st.selectbox("PEDRA", ["Ametista", "Quartzo", "Topázio", "Ágata"])
+        bolsista = st.selectbox("BOLSISTA", ["Sim", "Não"])
+        idade = st.number_input("IDADE_ALUNO", 6, 20, 12)
+
+    if st.button("Analisar Fatores de Influência"):
+        payload = {
+            "INDE": inde, "IAA": iaa, "IEG": ieg, "IPS": ips,
+            "IDA": ida, "IPP": ipp, "IPV": ipv, "IAN": ian,
+            "FASE": fase, "PEDRA": pedra, "BOLSISTA": bolsista,
+            "IDADE_ALUNO": idade
+        }
+        
+        try:
+            response = requests.post(f"{API_URL}/predict/explain", json=payload, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                
+                st.subheader(f"Resultado: {data['label']}")
+                st.write(f"Probabilidade de Ponto de Virada: **{data['probability']:.1%}**")
+                
+                # Gráfico SHAP
+                contributions = data["top_contributions"]
+                df_shap = pd.DataFrame(contributions)
+                df_shap = df_shap.sort_values("contribution", ascending=True)
+                
+                # Cores baseadas no sinal (positivo empurra para o ponto de virada)
+                df_shap["cor"] = df_shap["contribution"].apply(lambda x: "Positivo (Aumenta Chance)" if x > 0 else "Negativo (Diminui Chance)")
+                
+                fig = px.bar(
+                    df_shap,
+                    x="contribution",
+                    y="feature",
+                    orientation="h",
+                    color="cor",
+                    color_discrete_map={
+                        "Positivo (Aumenta Chance)": "#27ae60",
+                        "Negativo (Diminui Chance)": "#e74c3c"
+                    },
+                    title="Top Fatores que Influenciaram esta Decisão"
+                )
+                
+                fig.update_layout(xaxis_title="Peso da Influência (SHAP Value)", yaxis_title="Feature")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.info("💡 **Dica Pedagógica:** Barras verdes indicam comportamentos que estão aproximando o aluno do ponto de virada. Barras vermelhas mostram pontos de atenção que estão impedindo a evolução.")
+            else:
+                st.error(f"Erro na API: {response.text}")
+        except Exception as e:
+            st.error(f"Erro ao conectar com a API: {str(e)}")
+
+st.markdown("---")
+
 # Monitoramento de Drift
 st.header("Detecção de Drift")
 

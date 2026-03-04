@@ -33,6 +33,16 @@ class _DummyPredictor:
     def get_feature_names(self):
         return ["INDE_scaled", "IAA_scaled"]
 
+    def explain(self, data, top_n=5):
+        return {
+            "base_value": 0.5,
+            "top_contributions": [
+                {"feature": "INDE_scaled", "contribution": 0.2},
+                {"feature": "IAA_scaled", "contribution": 0.1}
+            ],
+            "all_contributions": []
+        }
+
 
 class _DummyRegistry:
     def __init__(self, group):
@@ -284,3 +294,22 @@ class TestApiExtended:
             assert resp.status_code == 500
             body = resp.json()
             assert body["detail"] == "Internal server error"
+
+    def test_predict_explain_success(self, client_ok):
+        client, _, _ = client_ok
+        payload = {
+            "INDE": 7.5, "IAA": 8.0, "IEG": 7.0, "IPS": 6.5,
+            "IDA": 7.2, "IPP": 6.8, "IPV": 7.5, "IAN": 5.0,
+            "FASE": "3", "PEDRA": "Ametista", "BOLSISTA": "Não"
+        }
+        resp = client.post("/predict/explain?top_n=2", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "top_contributions" in data
+        assert len(data["top_contributions"]) == 2
+        assert data["label"] == "Ponto de Virada Provável"
+
+    def test_predict_explain_without_model(self, client_startup_failure):
+        payload = {"INDE": 7.5, "IAA": 8.0, "IEG": 7.0, "IPS": 6.5, "IDA": 7.2, "IPP": 6.8, "IPV": 7.5, "IAN": 5.0, "FASE": "3", "PEDRA": "Ametista", "BOLSISTA": "Não"}
+        resp = client_startup_failure.post("/predict/explain", json=payload)
+        assert resp.status_code == 503
