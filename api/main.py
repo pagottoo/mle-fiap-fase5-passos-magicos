@@ -36,6 +36,7 @@ app = FastAPI(
     ## Endpoints
 
     - **POST /predict**: Predict for one student
+    - **POST /predict/explain**: Predict and explain (XAI) using SHAP
     - **POST /predict/batch**: Predict for multiple students
     - **GET /predict/aluno/{aluno_id}**: Predict using Feature Store
     - **GET /health**: Check API health
@@ -199,6 +200,23 @@ class PredictionResponse(BaseModel):
     timestamp: str
 
 
+class FeatureContribution(BaseModel):
+    """Individual feature contribution to the prediction."""
+    feature: str
+    contribution: float
+
+
+class ExplanationResponse(BaseModel):
+    """Schema for prediction explanation (XAI)."""
+    prediction: int
+    label: str
+    probability: float
+    base_value: float
+    top_contributions: List[FeatureContribution]
+    model_version: str
+    timestamp: str
+
+
 class BatchPredictionRequest(BaseModel):
     """Schema for batch prediction request."""
     students: List[StudentData]
@@ -343,6 +361,50 @@ async def predict(student: StudentData):
     
     except Exception as e:
         logger.error("prediction_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/predict/explain", response_model=ExplanationResponse, tags=["Prediction"])
+async def explain_prediction(student: StudentData, top_n: int = 5):
+    """
+    Predict and explain the outcome for a single student (XAI).
+
+    Using SHAP (SHapley Additive exPlanations) to show which features
+    pushed the model towards or against the Turning Point.
+    """
+    if predictor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Modelo não carregado."
+        )
+    
+    try:
+        input_data = student.model_dump(exclude_none=True)
+        
+        # 1. Get prediction
+        result = predictor.predict(input_data)
+        
+        # 2. Get explanation
+        explanation = predictor.explain(input_data, top_n=top_n)
+        
+        if "error" in explanation:
+            raise HTTPException(status_code=500, detail=explanation["error"])
+            
+        return ExplanationResponse(
+            prediction=result["prediction"],
+            label=result["label"],
+            probability=result["probability_turning_point"],
+            base_value=explanation["base_value"],
+            top_contributions=[
+                FeatureContribution(**c) for c in explanation["top_contributions"]
+            ],
+            model_version=result["model_version"],
+            timestamp=datetime.now().isoformat()
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("explanation_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

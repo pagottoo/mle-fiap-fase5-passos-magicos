@@ -36,3 +36,4 @@ mypy>=1.7.0
 # Visualization (for drift dashboard)
 streamlit>=1.29.0
 plotly>=5.18.0
+shap>=0.44.0

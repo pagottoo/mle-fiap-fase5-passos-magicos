@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 import pandas as pd
 import structlog
+import shap
 
 from ..config import MODELS_DIR, MODEL_CONFIG
 
@@ -58,6 +59,7 @@ class ModelPredictor:
         self.model = None
         self.preprocessor = None
         self.feature_engineer = None
+        self.explainer = None
         self.loaded_from = None  # "local" or "mlflow"
         
         self._load_model()
@@ -80,6 +82,14 @@ class ModelPredictor:
 
         # Local file fallback
         self._load_from_file()
+        
+        # Initialize explainer if model is loaded
+        if self.model is not None:
+            try:
+                self.explainer = shap.TreeExplainer(self.model)
+                logger.info("shap_explainer_initialized")
+            except Exception as e:
+                logger.warning("shap_explainer_init_failed", error=str(e))
     
     def _load_from_mlflow(self) -> None:
         """Load model from MLflow Model Registry."""
@@ -246,6 +256,67 @@ class ModelPredictor:
         
         return results
     
+    def explain(self, data: Dict[str, Any], top_n: int = 5) -> Dict[str, Any]:
+        """
+        Explain prediction using SHAP.
+
+        Args:
+            data: Input data.
+            top_n: Number of top features to return.
+
+        Returns:
+            Dictionary with top feature contributions.
+        """
+        if self.explainer is None:
+            return {"error": "SHAP explainer not available for this model"}
+
+        # Preprocess input
+        df = self.preprocess_input(data)
+        if self.loaded_from == "mlflow" or (not self.feature_engineer):
+            X = df.values
+            feature_names = df.columns.tolist()
+        else:
+            X, _ = self.feature_engineer.get_feature_matrix(df)
+            feature_names = self.feature_engineer.feature_names
+
+        # Calculate SHAP values
+        # For RandomForest, shap_values is a list [class_0, class_1]
+        shap_values = self.explainer.shap_values(X)
+        
+        # We focus on class 1 (Ponto de Virada)
+        if isinstance(shap_values, list):
+            # SHAP version < 0.45 or specific formats
+            cls_1_shap = shap_values[1][0] if len(shap_values) > 1 else shap_values[0]
+        else:
+            # SHAP version >= 0.45 often returns (n_samples, n_features, n_classes)
+            if len(shap_values.shape) == 3:
+                cls_1_shap = shap_values[0, :, 1]
+            else:
+                cls_1_shap = shap_values[0]
+
+        # Map to feature names and sort
+        contributions = []
+        for i, val in enumerate(cls_1_shap):
+            contributions.append({
+                "feature": feature_names[i],
+                "contribution": round(float(val), 4)
+            })
+            
+        # Sort by absolute contribution
+        contributions.sort(key=lambda x: abs(x["contribution"]), reverse=True)
+        
+        # Get base value
+        if isinstance(self.explainer.expected_value, (list, np.ndarray)):
+            base_val = float(self.explainer.expected_value[1])
+        else:
+            base_val = float(self.explainer.expected_value)
+            
+        return {
+            "base_value": round(base_val, 4),
+            "top_contributions": contributions[:top_n],
+            "all_contributions": contributions
+        }
+
     def get_model_info(self) -> Dict[str, Any]:
         """
         Return metadata about the loaded model.
