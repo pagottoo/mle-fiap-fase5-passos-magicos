@@ -81,6 +81,17 @@ jobs:
           echo "API image: ${API_IMAGE}"
           echo "Dashboard image: ${DASHBOARD_IMAGE}"
 
+      - name: Set API base image ref
+        id: api-base
+        run: |
+          DEPS_HASH="$(sha256sum requirements-api.txt | awk '{print $1}' | cut -c1-16)"
+          PLATFORMS_HASH="$(echo -n "${{ steps.platforms.outputs.platforms }}" | sha256sum | awk '{print $1}' | cut -c1-8)"
+          API_BASE_IMAGE="${REGISTRY}/${REPO_OWNER}/${IMAGE_NAME}-api-base:${DEPS_HASH}-${PLATFORMS_HASH}"
+          echo "deps_hash=${DEPS_HASH}" >> "$GITHUB_OUTPUT"
+          echo "platforms_hash=${PLATFORMS_HASH}" >> "$GITHUB_OUTPUT"
+          echo "api_base_image=${API_BASE_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "API base image: ${API_BASE_IMAGE}"
+
       - name: Validate Docker Hub credentials
         run: |
           if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
@@ -114,6 +125,30 @@ jobs:
             type=raw,value=${{ steps.version.outputs.version }}
             type=sha
 
+      - name: Check API base image in registry
+        id: api-base-check
+        run: |
+          if docker buildx imagetools inspect "${{ steps.api-base.outputs.api_base_image }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "API base image found in registry; reusing."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "API base image not found; building."
+          fi
+
+      - name: Build and push API base image
+        if: steps.api-base-check.outputs.exists != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: api-deps-local
+          push: true
+          platforms: ${{ steps.platforms.outputs.platforms }}
+          tags: ${{ steps.api-base.outputs.api_base_image }}
+          cache-from: type=gha,scope=api-base
+          cache-to: type=gha,scope=api-base,mode=min
+
       - name: Build and push API image
         uses: docker/build-push-action@v5
         with:
@@ -121,6 +156,8 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: ${{ steps.platforms.outputs.platforms }}
+          build-args: |
+            API_BASE_IMAGE=${{ steps.api-base.outputs.api_base_image }}
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
           cache-from: type=gha,scope=api
@@ -154,6 +191,7 @@ jobs:
           echo "- Version: \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- API: \`${{ steps.refs.outputs.api_image }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Dashboard: \`${{ steps.refs.outputs.dashboard_image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API base: \`${{ steps.api-base.outputs.api_base_image }}\` (reused: \`${{ steps.api-base-check.outputs.exists }}\`)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Platforms: \`${{ steps.platforms.outputs.platforms }}\`" >> "$GITHUB_STEP_SUMMARY"
 
   gitops-pr:

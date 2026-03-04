@@ -202,9 +202,6 @@ jobs:
     outputs:
       gitops_pr_url: ${{ steps.create_pr.outputs.pull-request-url }}
       gitops_pr_operation: ${{ steps.create_pr.outputs.pull-request-operation }}
-    environment:
-      name: production
-      url: https://passos-magicos.example.com
     
     steps:
       - name: Checkout default branch

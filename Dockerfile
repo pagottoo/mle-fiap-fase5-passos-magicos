@@ -1,27 +1,27 @@
-# Multi-stage build
+ARG PYTHON_IMAGE=python:3.11-slim
+ARG API_BASE_IMAGE=api-deps-local
 
-# Stage 1: Build
-FROM python:3.11-slim as builder
+# Local dependency stage. Can be published and reused as external base image.
+FROM ${PYTHON_IMAGE} AS api-deps-local
 
-WORKDIR /app
+WORKDIR /tmp
+
+COPY requirements-api.txt /tmp/requirements-api.txt
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    && pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --prefer-binary -r /tmp/requirements-api.txt \
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/pip /tmp/*
 
-COPY requirements-api.txt .
-RUN pip install --no-cache-dir --user -r requirements-api.txt
-
-# Stage 2: Runtime
-FROM python:3.11-slim
+# Final runtime image.
+# By default it uses the local dependency stage.
+# In CD we can pass API_BASE_IMAGE=<registry>/<repo>-api-base:<tag>
+FROM ${API_BASE_IMAGE} AS runtime
 
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
 
 COPY src/ ./src/
 COPY api/ ./api/
