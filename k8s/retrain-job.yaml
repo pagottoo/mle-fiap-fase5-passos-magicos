@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: passos-magicos-retrain-job
-  namespace: mlops
+  namespace: passos-magicos
   annotations:
     # Esta anotação será alterada pelo GHA para forçar o ArgoCD a recriar o Job
     mlops.passos-magicos/triggered-at: "placeholder"
