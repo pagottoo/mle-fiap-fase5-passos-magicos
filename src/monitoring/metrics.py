@@ -68,6 +68,16 @@ class MetricsCollector:
         "passos_magicos_api_feature_store_loaded",
         "Feature Store loaded status (1 loaded, 0 not loaded).",
     )
+    FEEDBACK_TOTAL = _get_or_create_metric(
+        Counter,
+        "passos_magicos_api_feedback_total",
+        "Total ground truth feedbacks received.",
+    )
+    ACCURATE_PREDICTIONS_TOTAL = _get_or_create_metric(
+        Counter,
+        "passos_magicos_api_accurate_predictions_total",
+        "Total number of correct predictions based on feedback.",
+    )
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -77,6 +87,8 @@ class MetricsCollector:
         """Reset in-memory JSON metrics."""
         self.total_requests = 0
         self.total_predictions = 0
+        self.total_feedbacks = 0
+        self.correct_predictions = 0
         self.predictions_by_class = defaultdict(int)
         self.request_durations: List[float] = []
         self.requests_by_endpoint = defaultdict(int)
@@ -162,6 +174,19 @@ class MetricsCollector:
         if confidence is not None:
             self.PREDICTION_CONFIDENCE.observe(max(0.0, min(1.0, float(confidence))))
 
+    def record_feedback(self, is_correct: bool) -> None:
+        """
+        Record one ground truth feedback event.
+        """
+        with self._lock:
+            self.total_feedbacks += 1
+            if is_correct:
+                self.correct_predictions += 1
+        
+        self.FEEDBACK_TOTAL.inc()
+        if is_correct:
+            self.ACCURATE_PREDICTIONS_TOTAL.inc()
+
     def get_metrics(self) -> Dict[str, Any]:
         """
         Return JSON metrics for backward compatibility.
@@ -187,11 +212,18 @@ class MetricsCollector:
                     "class_0_pct": round(self.predictions_by_class[0] / total_preds * 100, 2),
                     "class_1_pct": round(self.predictions_by_class[1] / total_preds * 100, 2),
                 }
+            
+            # Production performance metrics
+            prod_accuracy = 0.0
+            if self.total_feedbacks > 0:
+                prod_accuracy = round(self.correct_predictions / self.total_feedbacks, 4)
 
             return {
                 "uptime_seconds": round(uptime, 2),
                 "total_requests": self.total_requests,
                 "total_predictions": self.total_predictions,
+                "total_feedbacks": self.total_feedbacks,
+                "production_accuracy": prod_accuracy,
                 "requests_per_second": round(self.total_requests / uptime, 4) if uptime > 0 else 0,
                 "predictions_by_class": dict(self.predictions_by_class),
                 "prediction_distribution": pred_distribution,
