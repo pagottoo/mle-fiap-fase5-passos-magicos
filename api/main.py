@@ -36,6 +36,7 @@ app = FastAPI(
     ## Endpoints
 
     - **POST /predict**: Predict for one student
+    - **POST /predict/feedback**: Submit ground truth outcome
     - **POST /predict/explain**: Predict and explain (XAI) using SHAP
     - **POST /predict/batch**: Predict for multiple students
     - **GET /predict/aluno/{aluno_id}**: Predict using Feature Store
@@ -191,6 +192,7 @@ class StudentData(BaseModel):
 
 class PredictionResponse(BaseModel):
     """Schema for prediction response."""
+    prediction_id: str = Field(..., description="Unique identifier for this prediction")
     prediction: int
     label: str
     probability_no_turning_point: float
@@ -198,6 +200,13 @@ class PredictionResponse(BaseModel):
     confidence: float
     model_version: str
     timestamp: str
+
+
+class FeedbackRequest(BaseModel):
+    """Schema for ground truth feedback."""
+    prediction_id: str = Field(..., description="The ID of the original prediction")
+    actual_outcome: int = Field(..., description="The actual outcome (0 or 1)")
+    comment: Optional[str] = None
 
 
 class FeatureContribution(BaseModel):
@@ -208,6 +217,7 @@ class FeatureContribution(BaseModel):
 
 class ExplanationResponse(BaseModel):
     """Schema for prediction explanation (XAI)."""
+    prediction_id: str = Field(..., description="Unique identifier for this prediction")
     prediction: int
     label: str
     probability: float
@@ -322,6 +332,7 @@ async def predict(student: StudentData):
     Predict Turning Point for a single student.
 
     Returns:
+    - prediction_id: unique ID for tracking
     - prediction: 0 (unlikely) or 1 (likely)
     - label: class label from the model
     - probability_*: class probabilities
@@ -334,11 +345,17 @@ async def predict(student: StudentData):
         )
     
     try:
+        # Generate unique ID for this prediction
+        prediction_id = str(uuid.uuid4())
+        
         # Convert payload to dictionary
         input_data = student.model_dump(exclude_none=True)
 
         # Run prediction
         result = predictor.predict(input_data)
+        
+        # Inject ID into result
+        result["prediction_id"] = prediction_id
 
         # Log prediction for monitoring
         log_prediction(input_data, result)
@@ -350,6 +367,7 @@ async def predict(student: StudentData):
         )
         
         return PredictionResponse(
+            prediction_id=prediction_id,
             prediction=result["prediction"],
             label=result["label"],
             probability_no_turning_point=result["probability_no_turning_point"],
@@ -361,6 +379,50 @@ async def predict(student: StudentData):
     
     except Exception as e:
         logger.error("prediction_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/predict/feedback", tags=["Monitoring"])
+async def submit_feedback(feedback: FeedbackRequest):
+    """
+    Submit ground truth for a past prediction.
+
+    This allows calculating production accuracy by comparing the 
+    'actual_outcome' with the original model prediction.
+    """
+    try:
+        from src.monitoring.logger import get_recent_predictions, log_feedback
+        
+        # 1. Find the original prediction
+        recent_preds = get_recent_predictions(n=500)
+        original_pred = next(
+            (p for p in recent_preds if p["output"].get("prediction_id") == feedback.prediction_id), 
+            None
+        )
+        
+        is_correct = None
+        if original_pred:
+            predicted_class = int(original_pred["output"]["prediction"])
+            is_correct = (predicted_class == feedback.actual_outcome)
+            
+            # Record metric
+            metrics_collector.record_feedback(is_correct=is_correct)
+            
+        # 2. Log feedback
+        log_feedback({
+            "prediction_id": feedback.prediction_id,
+            "actual_outcome": feedback.actual_outcome,
+            "comment": feedback.comment,
+            "was_correct": is_correct
+        })
+        
+        return {
+            "status": "success",
+            "message": "Feedback registrado",
+            "was_correct": is_correct
+        }
+    except Exception as e:
+        logger.error("feedback_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -379,10 +441,14 @@ async def explain_prediction(student: StudentData, top_n: int = 5):
         )
     
     try:
+        # Generate unique ID for this prediction
+        prediction_id = str(uuid.uuid4())
+        
         input_data = student.model_dump(exclude_none=True)
         
         # 1. Get prediction
         result = predictor.predict(input_data)
+        result["prediction_id"] = prediction_id
         
         # 2. Get explanation
         explanation = predictor.explain(input_data, top_n=top_n)
@@ -390,7 +456,11 @@ async def explain_prediction(student: StudentData, top_n: int = 5):
         if "error" in explanation:
             raise HTTPException(status_code=500, detail=explanation["error"])
             
+        # Log prediction
+        log_prediction(input_data, result)
+            
         return ExplanationResponse(
+            prediction_id=prediction_id,
             prediction=result["prediction"],
             label=result["label"],
             probability=result["probability_turning_point"],
@@ -785,7 +855,9 @@ async def predict_by_aluno_id(aluno_id: int):
             )
         
         # 2. Run prediction
+        prediction_id = str(uuid.uuid4())
         result = predictor.predict(feature_vector)
+        result["prediction_id"] = prediction_id
 
         # 3. Log and record metrics (request metric already handled by middleware)
         metrics_collector.record_prediction(
@@ -796,6 +868,7 @@ async def predict_by_aluno_id(aluno_id: int):
         log_prediction({"aluno_id": aluno_id, "source": "feature_store"}, result)
         
         return PredictionResponse(
+            prediction_id=prediction_id,
             prediction=result["prediction"],
             label=result["label"],
             probability_no_turning_point=result["probability_no_turning_point"],
