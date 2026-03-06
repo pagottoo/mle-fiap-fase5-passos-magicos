@@ -11,7 +11,7 @@ spec:
     spec:
       containers:
       - name: trainer
-        image: thiagopagotto/passos-magicos-api:latest # Usa a mesma imagem da API que contém os scripts
+        image: thiagopagotto/passos-magicos-api:v0.0.5
         command: ["python", "scripts/train_model.py", "--year", "all", "--promote-to-staging"]
         envFrom:
         - configMapRef:
