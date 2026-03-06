@@ -3,23 +3,66 @@ kind: Job
 metadata:
   name: passos-magicos-retrain-job
   namespace: passos-magicos
+  labels:
+    app: passos-magicos
+    component: training-job
   annotations:
-    # Esta anotação será alterada pelo GHA para forçar o ArgoCD a recriar o Job
+    # Esta anotação é alterada pelo GitHub Actions para disparar o Job via Argo CD
     mlops.passos-magicos/triggered-at: "placeholder"
 spec:
+  # TTL para limpar o Job automaticamente do cluster após 1 hora do término
+  ttlSecondsAfterFinished: 3600
   template:
+    metadata:
+      labels:
+        app: passos-magicos
+        component: training-job
     spec:
-      containers:
-      - name: trainer
-        image: docker.io/pagottoo/passos-magicos-api:v0.0.5
-        command: ["python", "scripts/train_model.py", "--year", "all", "--promote-to-staging"]
-        envFrom:
-        - configMapRef:
-            name: passos-magicos-config
-        - secretRef:
-            name: passos-magicos-secrets
-        env:
-        - name: TRAIN_DATA_SOURCE
-          value: "s3"
       restartPolicy: Never
-  backoffLimit: 1
+      containers:
+        - name: trainer
+          image: docker.io/pagottoo/passos-magicos-api:v0.0.5
+          imagePullPolicy: Always
+          command: ["python", "scripts/train_model.py"]
+          args: ["--year", "all", "--promote-to-staging"]
+          envFrom:
+            - configMapRef:
+                name: passos-magicos-config
+            - secretRef:
+                name: mlflow-tracking-auth
+                optional: true
+          env:
+            - name: TRAIN_DATA_SOURCE
+              value: "s3"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://passos-magicos-otel-collector.mle-system.svc.cluster.local:4317"
+            - name: LOG_SERVICE_NAME
+              value: "passos-magicos"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: ENABLE_OTEL
+              value: "true"
+          volumeMounts:
+            - name: models
+              mountPath: /app/models
+            - name: logs
+              mountPath: /app/logs
+            - name: feature-store
+              mountPath: /app/feature_store
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+        - name: logs
+          persistentVolumeClaim:
+            claimName: logs-pvc
+        - name: feature-store
+          persistentVolumeClaim:
+            claimName: feature-store-pvc
