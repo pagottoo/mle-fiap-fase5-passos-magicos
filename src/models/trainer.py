@@ -251,24 +251,20 @@ class ModelTrainer:
         """
         logger.info("training_model", samples=len(X_train))
         
-        # Log dataset metadata to MLflow
-        if self.mlflow_enabled and self.tracker:
-            self.tracker.log_params({
-                "train_samples": len(X_train),
-                "n_features": X_train.shape[1] if len(X_train.shape) > 1 else 1,
-                "positive_class_ratio": round(y_train.mean(), 4)
-            })
-            
-            # Use mlflow.data if feature_names are available
-            if feature_names is not None:
-                try:
-                    df_train = pd.DataFrame(X_train, columns=feature_names)
-                    df_train["target"] = y_train
-                    self.tracker.log_training_dataset(df_train, name="passos_magicos_train", targets="target")
-                except Exception as e:
-                    logger.warning("dataset_log_failed", error=str(e))
-        
-        self.model.fit(X_train, y_train)
+        if feature_names is not None:
+            try:
+                X_train_df = pd.DataFrame(X_train, columns=feature_names)
+                self.model.fit(X_train_df, y_train)
+                
+                # Log dataset metadata to MLflow using the DF
+                df_log = X_train_df.copy()
+                df_log["target"] = y_train
+                self.tracker.log_training_dataset(df_log, name="passos_magicos_train", targets="target")
+            except Exception as e:
+                logger.warning("train_with_df_failed_falling_back", error=str(e))
+                self.model.fit(X_train, y_train)
+        else:
+            self.model.fit(X_train, y_train)
         
         # Extract feature importance when available
         if hasattr(self.model, "feature_importances_"):
@@ -305,8 +301,11 @@ class ModelTrainer:
         """
         logger.info("evaluating_model", samples=len(X_test))
         
-        y_pred = self.model.predict(X_test)
-        y_proba = self.model.predict_proba(X_test)[:, 1]
+        # Use DataFrame for consistency if feature names available
+        X_test_eval = pd.DataFrame(X_test, columns=feature_names) if feature_names else X_test
+        
+        y_pred = self.model.predict(X_test_eval)
+        y_proba = self.model.predict_proba(X_test_eval)[:, 1]
         
         self.metrics = {
             "accuracy": round(accuracy_score(y_test, y_pred), 4),
