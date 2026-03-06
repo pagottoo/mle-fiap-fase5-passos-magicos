@@ -4,6 +4,7 @@ Used by CI/CD workflows to interact with MLflow Registry.
 """
 import argparse
 import sys
+import logging
 from typing import Optional
 
 # Ensure project root is in path
@@ -13,7 +14,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.mlflow_tracking import ModelRegistry
 from src.monitoring.logger import setup_logging, get_logger
 
-setup_logging()
+# Force logging to stderr for CLI tools that use stdout for GHA outputs
+def setup_cli_logging():
+    setup_logging()
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        if isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout:
+            handler.setStream(sys.stderr)
+
+setup_cli_logging()
 logger = get_logger(component="model_ops")
 
 def check_versions(model_name: str):
@@ -26,15 +35,16 @@ def check_versions(model_name: str):
     prod_v = prod.version if prod else "None"
     staging_v = staging.version if staging else "None"
     
-    # We output in a format that GHA can parse easily
-    print(f"production_version={prod_v}")
-    print(f"staging_version={staging_v}")
+    # We output in a format that GHA can parse easily (stdout only for these)
+    sys.stdout.write(f"production_version={prod_v}\n")
+    sys.stdout.write(f"staging_version={staging_v}\n")
     
     # Logic for target version
     if staging_v != "None":
-        print(f"target_version={staging_v}")
+        sys.stdout.write(f"target_version={staging_v}\n")
     else:
-        print(f"target_version=None")
+        sys.stdout.write(f"target_version=None\n")
+    sys.stdout.flush()
 
 def promote_model(model_name: str, version: int, stage: str):
     """Promote a specific version to a stage."""
@@ -46,10 +56,10 @@ def promote_model(model_name: str, version: int, stage: str):
     elif stage.lower() == "production":
         registry.promote_to_production(model_name, version)
     else:
-        print(f"Error: Invalid stage {stage}")
+        sys.stderr.write(f"Error: Invalid stage {stage}\n")
         sys.exit(1)
     
-    print(f"Success: Model {model_name} v{version} promoted to {stage}")
+    sys.stderr.write(f"Success: Model {model_name} v{version} promoted to {stage}\n")
 
 def main():
     parser = argparse.ArgumentParser(description="MLOps Model Lifecycle CLI")

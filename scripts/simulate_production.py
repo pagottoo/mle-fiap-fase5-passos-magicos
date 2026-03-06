@@ -47,59 +47,87 @@ def get_student_payload(drift=False):
             "IDADE_ALUNO": random.randint(7, 18)
         }
 
-def run_simulation(n_normal=50, n_drift=20):
-    print(f"🚀 Iniciando simulação em {API_URL}...")
-    prediction_ids = []
+def get_actual_outcome(payload, noise_level=0.0):
+    """
+    Calculate the 'true' outcome based on business rules.
+    Matches the logic in FeatureEngineer.create_target_variable.
+    """
+    # 1. Base logic: High INDE or IPV or specific stones
+    is_turning_point = 0
+    if payload.get("INDE", 0) >= 7.5 or payload.get("IPV", 0) >= 7.5:
+        is_turning_point = 1
+    elif payload.get("PEDRA") in ["Topázio", "Ágata"]:
+        is_turning_point = 1
+    
+    # 2. Add noise to simulate real-world errors or model limitations
+    if random.random() < noise_level:
+        return 1 - is_turning_point
+    
+    return is_turning_point
+
+def run_simulation(n_normal=50, n_drift=20, error_mode=False):
+    print(f"Iniciando simulação em {API_URL} (Modo Erro: {error_mode})...")
+    prediction_data = []
 
     # 1. Gerar tráfego normal
-    print(f"📦 Enviando {n_normal} predições normais...")
+    print(f"Enviando {n_normal} predições normais...")
     for _ in range(n_normal):
         try:
             payload = get_student_payload(drift=False)
-            # Mix /predict and /predict/explain
             endpoint = "/predict/explain" if random.random() > 0.7 else "/predict"
             resp = requests.post(f"{API_URL}{endpoint}", json=payload, timeout=5)
             if resp.status_code == 200:
-                prediction_ids.append(resp.json()["prediction_id"])
+                pid = resp.json()["prediction_id"]
+                # Store payload to calculate correct outcome later
+                prediction_data.append({"id": pid, "payload": payload})
             time.sleep(0.1)
         except Exception as e:
             print(f"Erro: {e}")
 
     # 2. Gerar Drift (Anomalias)
-    print(f"⚠️ Gerando {n_drift} predições com Drift (notas baixas)...")
+    print(f"Gerando {n_drift} predições com Drift (notas baixas)...")
     for _ in range(n_drift):
         try:
             payload = get_student_payload(drift=True)
             resp = requests.post(f"{API_URL}/predict", json=payload, timeout=5)
             if resp.status_code == 200:
-                prediction_ids.append(resp.json()["prediction_id"])
+                pid = resp.json()["prediction_id"]
+                prediction_data.append({"id": pid, "payload": payload})
             time.sleep(0.1)
         except Exception as e:
             print(f"Erro: {e}")
 
     # 3. Enviar Feedbacks (Ground Truth)
-    print(f"✅ Enviando feedbacks para {len(prediction_ids)//2} predições...")
-    sampled_ids = random.sample(prediction_ids, k=len(prediction_ids)//2)
-    for pid in sampled_ids:
+    # Se error_mode for True, aumentamos o ruído para 50% (derrubando acurácia)
+    # Se False, ruído baixo (5%) para manter acurácia alta
+    noise = 0.5 if error_mode else 0.05
+    
+    print(f"Enviando feedbacks (Ruído: {noise*100}%)...")
+    sampled_data = random.sample(prediction_data, k=len(prediction_data)//2)
+    for item in sampled_data:
         try:
-            # Simulate real outcome (80% chance of model being right)
-            # Since we don't store the prediction here, we just send a random outcome
-            # the API will calculate correctness based on the logs
-            actual = random.choice([0, 1])
+            actual = get_actual_outcome(item["payload"], noise_level=noise)
             payload = {
-                "prediction_id": pid,
+                "prediction_id": item["id"],
                 "actual_outcome": actual,
-                "comment": "Simulação de campo"
+                "comment": "Simulação de campo" if not error_mode else "Simulação de erro proposital"
             }
             requests.post(f"{API_URL}/predict/feedback", json=payload, timeout=5)
             time.sleep(0.05)
         except Exception as e:
             print(f"Erro no feedback: {e}")
 
-    print("\n✨ Simulação concluída!")
+    print("\n Simulação concluída!")
     print(f"Total de predições: {n_normal + n_drift}")
     print(f"Total de feedbacks: {len(sampled_ids)}")
     print("Verifique o Grafana e o Dashboard Streamlit em alguns instantes.")
 
 if __name__ == "__main__":
-    run_simulation()
+    import argparse
+    parser = argparse.ArgumentParser(description="Simulate production traffic and feedback")
+    parser.add_argument("--error-mode", action="store_true", help="Simulate low accuracy and drift")
+    parser.add_argument("--n-normal", type=int, default=50, help="Number of normal predictions")
+    parser.add_argument("--n-drift", type=int, default=20, help="Number of drift predictions")
+    args = parser.parse_args()
+    
+    run_simulation(n_normal=args.n_normal, n_drift=args.n_drift, error_mode=args.error_mode)

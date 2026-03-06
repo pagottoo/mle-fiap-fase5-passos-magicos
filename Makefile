@@ -22,7 +22,7 @@ help:
 	@echo "  make dashboard    - sobe dashboard Streamlit local"
 	@echo "  make simulate     - gera tráfego, drift e feedback para popular dashboards locais"
 	@echo "  make simulate-remote URL=http://seu-k8s-ip - gera massa de dados para o ambiente remoto"
-	@echo "--- Operação Docker (Stack Completa) ---"
+	@echo "--- Operação Docker Compose (Stack Completa) ---"
 	@echo "  make mlflow-up    - sobe apenas o servidor MLflow (detached)"
 	@echo "  make serving-up   - sobe API e Dashboard conectados ao MLflow"
 	@echo "  make docker-up    - sobe toda a stack (MLflow + API + Dashboard)"
