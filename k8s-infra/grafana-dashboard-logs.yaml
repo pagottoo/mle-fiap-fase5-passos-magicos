@@ -75,7 +75,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (level) (count_over_time({namespace=\"$namespace\",service=\"passos-magicos\",component=~\"$component\"}[5m]))"
+              "expr": "sum by (level) (count_over_time({namespace=~\"$namespace\",service=\"passos-magicos\"} | json | component=~\"$component\" [5m]))"
             }
           ],
           "fieldConfig": {
@@ -110,7 +110,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(count_over_time({namespace=\"$namespace\",service=\"passos-magicos\",component=~\"$component\",level=~\"error|critical\"}[15m]))"
+              "expr": "sum(count_over_time({namespace=~\"$namespace\",service=\"passos-magicos\"} | json | component=~\"$component\" | level=~\"error|critical\" [15m]))"
             }
           ],
           "fieldConfig": {
@@ -165,7 +165,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "{namespace=\"$namespace\",service=\"passos-magicos\",component=~\"$component\"}"
+              "expr": "{namespace=~\"$namespace\",service=\"passos-magicos\"} | json | component=~\"$component\""
             }
           ],
           "options": {

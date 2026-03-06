@@ -85,7 +85,7 @@ data:
         relabel_configs:
           - action: keep
             source_labels: [__meta_kubernetes_namespace]
-            regex: passos-magicos
+            regex: (passos-magicos|mle-system)
 
           - action: replace
             source_labels: [__meta_kubernetes_namespace]
