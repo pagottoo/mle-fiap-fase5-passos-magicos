@@ -32,3 +32,32 @@ class TestMonitoringLoggerExtended:
         assert len(recent) == 1
         assert recent[0]["input"]["aluno_id"] == 2
         assert recent[0]["output"]["prediction"] == 0
+
+    def test_log_feedback_and_get_recent_feedback(self, monkeypatch, tmp_path):
+        from unittest.mock import ANY
+        monkeypatch.setattr(logger_module, "LOGS_DIR", tmp_path)
+        fake_logger = Mock()
+        monkeypatch.setattr(logger_module.structlog, "get_logger", Mock(return_value=fake_logger))
+
+        # Test empty
+        assert logger_module.get_recent_feedback() == []
+
+        feedback_data = {"prediction_id": "uuid-1", "actual_outcome": 1, "was_correct": True}
+        logger_module.log_feedback(feedback_data)
+
+        # Check logger call with ANY timestamp
+        fake_logger.info.assert_called_with(
+            "feedback_logged", 
+            type="feedback", 
+            timestamp=ANY,
+            **feedback_data
+        )
+        
+        recent = logger_module.get_recent_feedback(n=10)
+        assert len(recent) == 1
+        assert recent[0]["prediction_id"] == "uuid-1"
+        assert recent[0]["was_correct"] is True
+
+    def test_get_recent_predictions_empty(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(logger_module, "LOGS_DIR", tmp_path / "nonexistent")
+        assert logger_module.get_recent_predictions() == []
