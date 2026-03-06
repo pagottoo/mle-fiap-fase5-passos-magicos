@@ -35,6 +35,13 @@ spec:
             - secretRef:
                 name: mlflow-tracking-auth
                 optional: true
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://passos-magicos-otel-collector.mle-system.svc.cluster.local:4317"
+            - name: LOG_SERVICE_NAME
+              value: "passos-magicos"
+            - name: ENVIRONMENT
+              value: "production"
           volumeMounts:
             - name: models
               mountPath: /app/models
@@ -127,6 +134,12 @@ spec:
           env:
             - name: API_URL
               value: "http://passos-magicos-api:8000"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://passos-magicos-otel-collector.mle-system.svc.cluster.local:4317"
+            - name: LOG_SERVICE_NAME
+              value: "passos-magicos"
+            - name: ENVIRONMENT
+              value: "production"
           volumeMounts:
             - name: logs
               mountPath: /app/logs

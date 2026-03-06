@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-conf
+  namespace: mle-system
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        send_batch_size: 1000
+        timeout: 10s
+      
+      # Adiciona labels do Kubernetes aos logs
+      resourcedetection:
+        detectors: [env, system]
+        timeout: 2s
+
+    exporters:
+      loki:
+        endpoint: "http://passos-magicos-loki.mle-system.svc.cluster.local:3100/loki/api/v1/push"
+        default_labels_enabled:
+          exporter: true
+          job: true
+        
+    service:
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [loki]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: passos-magicos-otel-collector
+  namespace: mle-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:0.96.0
+        args:
+        - "--config=/etc/otelcol-contrib/config.yaml"
+        ports:
+        - containerPort: 4317 # OTLP gRPC
+        - containerPort: 4318 # OTLP HTTP
+        volumeMounts:
+        - name: otel-collector-config-vol
+          mountPath: /etc/otelcol-contrib
+      volumes:
+      - name: otel-collector-config-vol
+        configMap:
+          name: otel-collector-conf
+          items:
+          - key: otel-collector-config.yaml
+            path: config.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: passos-magicos-otel-collector
+  namespace: mle-system
+spec:
+  selector:
+    app: otel-collector
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
