@@ -47,43 +47,46 @@ def _add_schema_defaults(service_name: str, environment: str):
 
 def setup_logging(component: Optional[str] = None) -> None:
     """
-    Configure structured logging for the application with OpenTelemetry support.
+    Configure structured logging for the application with optional OpenTelemetry support.
     """
     raw_level = os.getenv("LOG_LEVEL", LOG_CONFIG.get("level", "INFO")).upper()
     log_level = getattr(logging, raw_level, logging.INFO)
     service_name = os.getenv("LOG_SERVICE_NAME", "passos-magicos").strip() or "passos-magicos"
     environment = os.getenv("ENVIRONMENT", "local").strip() or "local"
 
-    # 1. Setup OpenTelemetry Logging SDK
-    resource = Resource.create({
-        "service.name": service_name,
-        "service.component": component or "api",
-        "environment": environment
-    })
-    
-    logger_provider = LoggerProvider(resource=resource)
-    _logs.set_logger_provider(logger_provider)
-    
-    # Target the OTel Collector
-    otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://passos-magicos-otel-collector.mle-system.svc.cluster.local:4317")
-    exporter = OTLPLogExporter(endpoint=otel_endpoint, insecure=True)
-    logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
-    
-    # Handler to bridge python logging to OTel
-    otel_handler = LoggingHandler(level=log_level, logger_provider=logger_provider)
-
-    # 2. Configure Root Logger
+    # 1. Configure Root Logger (Standard Output)
     root_logger = logging.getLogger()
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Also keep console logging for K8s logs visibility
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(log_level)
-    
-    root_logger.addHandler(otel_handler)
+    # Use a simpler format for console if not using OTel
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
     root_logger.addHandler(console_handler)
     root_logger.setLevel(log_level)
+
+    # 2. Setup OpenTelemetry Logging SDK (Optional)
+    otel_enabled = os.getenv("ENABLE_OTEL", "false").lower() == "true"
+    if otel_enabled:
+        try:
+            resource = Resource.create({
+                "service.name": service_name,
+                "service.component": component or "api",
+                "environment": environment
+            })
+            
+            logger_provider = LoggerProvider(resource=resource)
+            _logs.set_logger_provider(logger_provider)
+            
+            otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://passos-magicos-otel-collector.mle-system.svc.cluster.local:4317")
+            exporter = OTLPLogExporter(endpoint=otel_endpoint, insecure=True)
+            logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
+            
+            otel_handler = LoggingHandler(level=log_level, logger_provider=logger_provider)
+            root_logger.addHandler(otel_handler)
+        except Exception:
+            # Silent fail for OTel in case of network/config issues
+            pass
 
     # 3. Configure Structlog
     structlog.configure(
@@ -105,9 +108,8 @@ def setup_logging(component: Optional[str] = None) -> None:
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
             _add_schema_defaults(service_name=service_name, environment=environment),
-            # Remove JSONRenderer here because OTel needs the dict
-            # We use format_log_level to ensure level is a string
-            structlog.stdlib.add_log_level,
+            # Important: JSONRenderer must be last to provide a string to the standard log handlers
+            structlog.processors.JSONRenderer()
         ],
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
