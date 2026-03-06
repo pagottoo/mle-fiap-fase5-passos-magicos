@@ -117,6 +117,54 @@ def log_prediction(input_data: Dict[str, Any], prediction: Dict[str, Any]) -> No
         f.write(json.dumps(log_entry) + "\n")
 
 
+def log_feedback(feedback_data: Dict[str, Any]) -> None:
+    """
+    Log ground truth feedback for a prediction.
+
+    Args:
+        feedback_data: Feedback record containing prediction_id and actual_outcome.
+    """
+    logger = get_logger(component="feedback")
+    
+    log_entry = {
+        "type": "feedback",
+        "timestamp": datetime.now().isoformat(),
+        **feedback_data
+    }
+    
+    # Structured log entry
+    logger.info("feedback_logged", **log_entry)
+
+    # Persist feedback log
+    feedback_log = LOGS_DIR / "feedback.jsonl"
+    with open(feedback_log, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry) + "\n")
+
+
+def get_recent_feedback(n: int = 1000) -> list:
+    """
+    Return the latest N feedback records from the log file.
+
+    Args:
+        n: Number of feedback records to retrieve.
+
+    Returns:
+        List of feedback records.
+    """
+    feedback_log = LOGS_DIR / "feedback.jsonl"
+    
+    if not feedback_log.exists():
+        return []
+    
+    feedback = []
+    with open(feedback_log, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                feedback.append(json.loads(line))
+    
+    return feedback[-n:]
+
+
 def get_recent_predictions(n: int = 1000) -> list:
     """
     Return the latest N predictions from the log file.
