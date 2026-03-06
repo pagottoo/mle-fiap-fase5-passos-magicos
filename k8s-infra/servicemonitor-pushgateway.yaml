@@ -4,8 +4,9 @@ metadata:
   name: passos-magicos-pushgateway
   namespace: mle-system
   labels:
-    release: kps-r8pi
+    release: kps
     app: passos-magicos
+    monitoring: prometheus
 spec:
   namespaceSelector:
     matchNames:
@@ -17,5 +18,4 @@ spec:
   endpoints:
     - port: http
       path: /metrics
-      interval: 30s
-      scrapeTimeout: 10s
+      interval: 15s

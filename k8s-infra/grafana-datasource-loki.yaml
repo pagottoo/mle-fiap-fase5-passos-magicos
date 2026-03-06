@@ -5,14 +5,14 @@ metadata:
   namespace: mle-system
   labels:
     app: passos-magicos
-    release: kps-r8pi
+    release: kps
     grafana_datasource: "1"
 data:
   loki-datasource.yaml: |
     apiVersion: 1
     datasources:
-      - name: Passos Magicos Loki
-        uid: passos-magicos-loki
+      - name: Loki
+        uid: Loki
         type: loki
         access: proxy
         url: http://passos-magicos-loki.mle-system.svc.cluster.local:3100

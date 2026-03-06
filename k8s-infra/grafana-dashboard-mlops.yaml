@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passos-magicos-grafana-dashboard-mlops
+  namespace: mle-system
+  labels:
+    app: passos-magicos
+    release: kps-r8pi
+    grafana_dashboard: "1"
+data:
+  passos-magicos-mlops.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "API Health & Serving",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "collapsed": false
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" }
+          },
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+          "title": "Throughput (RPS)",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "sum(rate(passos_magicos_api_requests_total[5m]))", "refId": "A" }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": { "color": { "mode": "thresholds" }, "unit": "ms", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 500 }] } }
+          },
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+          "title": "Latency P99",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "histogram_quantile(0.99, sum by (le) (rate(passos_magicos_api_request_duration_seconds_bucket[5m]))) * 1000", "refId": "A" }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": { "unit": "percent", "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }
+          },
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+          "title": "Error Rate (5xx)",
+          "type": "stat",
+          "targets": [
+            { "expr": "sum(rate(passos_magicos_api_requests_total{status_code=~\"5..\"}[5m])) / sum(rate(passos_magicos_api_requests_total[5m])) * 100", "refId": "A" }
+          ]
+        },
+        {
+          "title": "ML Model Performance",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+          "collapsed": false
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 0.7 }, { "color": "green", "value": 0.85 }] } }
+          },
+          "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 },
+          "title": "Production Accuracy (Ground Truth)",
+          "type": "gauge",
+          "targets": [
+            { "expr": "sum(passos_magicos_api_accurate_predictions_total) / sum(passos_magicos_api_feedback_total)", "refId": "A" }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "gridPos": { "h": 6, "w": 8, "x": 8, "y": 8 },
+          "title": "Prediction Distribution (Class 1)",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "sum(rate(passos_magicos_api_predictions_total{prediction_class=\"1\"}[1h])) / sum(rate(passos_magicos_api_predictions_total[1h]))", "refId": "A" }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 },
+          "title": "Average Confidence",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "rate(passos_magicos_api_prediction_confidence_sum[5m]) / rate(passos_magicos_api_prediction_confidence_count[5m])", "refId": "A" }
+          ]
+        },
+        {
+          "title": "Logs & Events (Loki)",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+          "collapsed": false
+        },
+        {
+          "datasource": "Loki",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+          "title": "Live Logs Search",
+          "type": "logs",
+          "targets": [
+            { "expr": "{service=\"passos-magicos\"} | json", "refId": "A" }
+          ],
+          "options": { "showTime": true, "enableLogDetails": true }
+        },
+        {
+          "title": "Operations & Jobs",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+          "collapsed": false
+        },
+        {
+          "datasource": "Prometheus",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
+          "title": "Last Training Status",
+          "type": "stat",
+          "targets": [
+            { "expr": "passos_magicos_job_last_success{component=\"training\"}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "FAILED", "color": "red" }, "1": { "text": "SUCCESS", "color": "green" } } }] } }
+        },
+        {
+          "datasource": "Prometheus",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 24 },
+          "title": "Last Training Duration",
+          "type": "stat",
+          "targets": [
+            { "expr": "passos_magicos_job_last_duration_seconds{component=\"training\"}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s" } }
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["mlops", "passos-magicos"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Passos Mágicos - MLOps Platform",
+      "uid": "passos-magicos-mlops",
+      "version": 1
+    }
