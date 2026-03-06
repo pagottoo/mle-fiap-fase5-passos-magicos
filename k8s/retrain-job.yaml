@@ -5,18 +5,16 @@ metadata:
   namespace: passos-magicos
   labels:
     app: passos-magicos
-    component: training-job
+    component: training
   annotations:
-    # Esta anotação é alterada pelo GitHub Actions para disparar o Job via Argo CD
     mlops.passos-magicos/triggered-at: "placeholder"
 spec:
-  # TTL para limpar o Job automaticamente do cluster após 1 hora do término
   ttlSecondsAfterFinished: 3600
   template:
     metadata:
       labels:
         app: passos-magicos
-        component: training-job
+        component: training
     spec:
       restartPolicy: Never
       containers:
@@ -28,18 +26,16 @@ spec:
           envFrom:
             - configMapRef:
                 name: passos-magicos-config
+            - configMapRef:
+                name: passos-magicos-train-config
+            - secretRef:
+                name: mlops-data-creds
             - secretRef:
                 name: mlflow-tracking-auth
                 optional: true
           env:
-            - name: TRAIN_DATA_SOURCE
-              value: "s3"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://passos-magicos-otel-collector.mle-system.svc.cluster.local:4317"
-            - name: LOG_SERVICE_NAME
-              value: "passos-magicos"
-            - name: ENVIRONMENT
-              value: "production"
             - name: ENABLE_OTEL
               value: "true"
           volumeMounts:
@@ -54,8 +50,8 @@ spec:
               memory: "512Mi"
               cpu: "500m"
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: "2Gi"
+              cpu: "1500m"
       volumes:
         - name: models
           persistentVolumeClaim:
