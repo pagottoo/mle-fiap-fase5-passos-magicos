@@ -20,7 +20,7 @@ spec:
         component: api
       annotations:
         # Alterado pelo workflow deploy-model.yml para forçar rollout via GitOps/Argo CD
-        mlops.passos-magicos/reload-at: "promote-production-v3-22293605425-1"
+        mlops.passos-magicos/reload-at: "promote-production-v27-22793395815-1"
     spec:
       containers:
         - name: api
