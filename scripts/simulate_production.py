@@ -119,7 +119,7 @@ def run_simulation(n_normal=50, n_drift=20, error_mode=False):
 
     print("\n Simulação concluída!")
     print(f"Total de predições: {n_normal + n_drift}")
-    print(f"Total de feedbacks: {len(sampled_ids)}")
+    print(f"Total de feedbacks: {len(sampled_data)}")
     print("Verifique o Grafana e o Dashboard Streamlit em alguns instantes.")
 
 if __name__ == "__main__":

@@ -273,14 +273,19 @@ async def log_requests(request: Request, call_next):
             duration=duration,
         )
 
+        # Add tracing and metrics
         response.headers["x-request-id"] = trace_id
-        logger.info(
-            "request_processed",
-            method=request.method,
-            path=route_path,
-            status_code=response.status_code,
-            duration_ms=round(duration * 1000, 2),
-        )
+        
+        # Avoid logging endpoints like health and metrics
+        noisy_paths = ["/health", "/metrics", "/metrics/prometheus"]
+        if route_path not in noisy_paths:
+            logger.info(
+                "request_processed",
+                method=request.method,
+                path=route_path,
+                status_code=response.status_code,
+                duration_ms=round(duration * 1000, 2),
+            )
         return response
     finally:
         metrics_collector.request_finished()

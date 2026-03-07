@@ -23,6 +23,14 @@ data:
         detectors: [env, system]
         timeout: 2s
 
+      # Parse do JSON body para evitar escape de aspas
+      transform:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - set(body, ParseJSON(body)) where IsMatch(body, "^\\{")
+
     exporters:
       loki:
         endpoint: "http://passos-magicos-loki.mle-system.svc.cluster.local:3100/loki/api/v1/push"
@@ -34,7 +42,7 @@ data:
       pipelines:
         logs:
           receivers: [otlp]
-          processors: [batch]
+          processors: [batch, transform]
           exporters: [loki]
 
 ---

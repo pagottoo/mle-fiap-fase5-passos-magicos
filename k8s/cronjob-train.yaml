@@ -98,7 +98,7 @@ data:
   PUSHGATEWAY_URL: "http://passos-magicos-pushgateway:9091"
   PUSHGATEWAY_JOB_NAME: "passos-magicos-monitoring"
   PUSHGATEWAY_NAMESPACE: "passos-magicos"
-
+  GITHUB_REPO: "pagottoo/mle-fiap-fase5-passos-magicos"
 ---
 apiVersion: batch/v1
 kind: CronJob

@@ -257,7 +257,7 @@ def run_performance_check(api_url: str, class1_min: float, class1_max: float) ->
 def _trigger_github_workflow(reason: str, metadata: Dict[str, Any]) -> bool:
     """Trigger a GitHub Action workflow via repository_dispatch."""
     token = os.getenv("GITHUB_TOKEN", "").strip()
-    repo = os.getenv("GITHUB_REPO", "thiagopagotto/passos-magicos-mlops").strip()
+    repo = os.getenv("GITHUB_REPO", "pagottoo/mle-fiap-fase5-passos-magicos").strip()
     
     if not token:
         logger.warning("github_retrain_trigger_skipped_no_token")

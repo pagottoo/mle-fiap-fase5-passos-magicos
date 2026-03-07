@@ -194,6 +194,10 @@ jobs:
             sed -E -i "s|^([[:space:]]*)image:[[:space:]]+.*/[^/]*-api:.*$|\\1image: ${API_IMAGE}|g" k8s/cronjob-train.yaml
           fi
 
+          if [ -f k8s/retrain-job.yaml ]; then
+            sed -E -i "s|^([[:space:]]*)image:[[:space:]]+.*/[^/]*-api:.*$|\\1image: ${API_IMAGE}|g" k8s/retrain-job.yaml
+          fi
+
           echo "Updated images in k8s manifests:"
           grep -n "image:" k8s/*.yaml
 
@@ -221,6 +225,7 @@ jobs:
           add-paths: |
             k8s/deployment.yaml
             k8s/cronjob-train.yaml
+            k8s/retrain-job.yaml
 
       - name: GitOps summary
         run: |
