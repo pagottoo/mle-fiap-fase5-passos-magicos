@@ -127,10 +127,14 @@ def client_ok(monkeypatch):
     dummy_predictor = _DummyPredictor()
     dummy_fs = _DummyFeatureStore()
 
-    monkeypatch.setattr(main, "ModelPredictor", lambda: dummy_predictor)
-    monkeypatch.setattr(main, "FeatureStore", lambda: dummy_fs)
+    from api import dependencies
+    monkeypatch.setattr(dependencies, "_create_predictor_from_runtime_config", lambda: dummy_predictor)
+    monkeypatch.setattr(dependencies, "FeatureStore", lambda: dummy_fs)
 
     with TestClient(main.app, raise_server_exceptions=False) as client:
+        # Forçar os globais no main para os testes
+        main.predictor = dummy_predictor
+        main.feature_store = dummy_fs
         main.metrics_collector.reset()
         yield client, dummy_predictor, dummy_fs
 
@@ -143,10 +147,14 @@ def client_startup_failure(monkeypatch):
     def _raise_fs():
         raise RuntimeError("sem feature store")
 
-    monkeypatch.setattr(main, "ModelPredictor", _raise_model)
-    monkeypatch.setattr(main, "FeatureStore", _raise_fs)
+    from api import dependencies
+    monkeypatch.setattr(dependencies, "_create_predictor_from_runtime_config", _raise_model)
+    monkeypatch.setattr(dependencies, "FeatureStore", _raise_fs)
 
     with TestClient(main.app, raise_server_exceptions=False) as client:
+        # Garantir que estão nulos
+        main.predictor = None
+        main.feature_store = None
         yield client
 
 
@@ -275,8 +283,7 @@ class TestApiExtended:
         assert invalid.status_code == 400
 
         empty = client.get("/predict/alunos?aluno_ids=999")
-        # Comportamento atual: HTTPException(404) é capturada e convertida em 500 no endpoint.
-        assert empty.status_code == 500
+        assert empty.status_code == 404
 
     def test_predict_batch_without_model(self, client_startup_failure):
         resp = client_startup_failure.post("/predict/batch", json={"students": []})
@@ -286,8 +293,9 @@ class TestApiExtended:
         # Forçar exceção não tratada em /model/info (sem método get_model_info)
         broken_predictor = object()
         fs = _DummyFeatureStore()
-        monkeypatch.setattr(main, "ModelPredictor", lambda: broken_predictor)
-        monkeypatch.setattr(main, "FeatureStore", lambda: fs)
+        from api import dependencies
+        monkeypatch.setattr(dependencies, "_create_predictor_from_runtime_config", lambda: broken_predictor)
+        monkeypatch.setattr(dependencies, "FeatureStore", lambda: fs)
 
         with TestClient(main.app, raise_server_exceptions=False) as client:
             resp = client.get("/model/info")
