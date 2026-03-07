@@ -19,7 +19,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: trainer
-          image: docker.io/pagottoo/passos-magicos-api:v0.0.5
+          image: docker.io/pagottoo/passos-magicos-api:v1.0.0
           imagePullPolicy: Always
           command: ["python", "scripts/train_model.py"]
           args: ["--year", "all", "--promote-to-staging"]
