@@ -112,7 +112,6 @@ async def model_info():
     """Return metadata for the loaded model (Compat)."""
     from fastapi import HTTPException
     # Use the global that tests patch
-    global predictor
     if predictor is None:
         raise HTTPException(status_code=503, detail="Modelo não carregado.")
     info = predictor.get_model_info()
@@ -122,7 +121,6 @@ async def model_info():
 async def get_features_compat():
     """Return features (Compat)."""
     from fastapi import HTTPException
-    global predictor
     if predictor is None:
         raise HTTPException(status_code=503, detail="Modelo não carregado.")
     return {"features": predictor.get_feature_names()}
