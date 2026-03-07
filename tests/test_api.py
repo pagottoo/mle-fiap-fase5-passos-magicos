@@ -39,9 +39,8 @@ class TestAPIEndpoints:
     def client(self, mock_predictor):
         """Cliente de teste com predictor mockado."""
         with patch("api.main.predictor", mock_predictor):
-            with patch("api.main.ModelPredictor", return_value=mock_predictor):
-                from api.main import app
-                yield TestClient(app)
+            from api.main import app
+            yield TestClient(app)
     
     def test_root(self, client):
         """Testa endpoint raiz."""

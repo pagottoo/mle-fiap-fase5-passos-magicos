@@ -542,11 +542,20 @@ def get_alert_manager() -> AlertManager:
 
 
 def send_alert(
-    alert_type: AlertType,
-    severity: AlertSeverity,
+    alert_type: str,
+    severity: str,
     title: str,
     message: str,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    *args,
+    **kwargs
 ) -> Dict[str, bool]:
     """Convenience function to send alerts."""
-    return get_alert_manager().send_alert(alert_type, severity, title, message, metadata)
+    return get_alert_manager().send_alert(
+        alert_type=alert_type, 
+        severity=severity, 
+        title=title, 
+        message=message, 
+        metadata=metadata
+    )
+

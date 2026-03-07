@@ -10,11 +10,15 @@ from datetime import datetime
 import json
 
 # OpenTelemetry Logging
-from opentelemetry import _logs
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
-from opentelemetry.sdk.resources import Resource
+try:
+    from opentelemetry import _logs
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+    from opentelemetry.sdk.resources import Resource
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
 
 from ..config import LOG_CONFIG, LOGS_DIR
 
@@ -67,7 +71,7 @@ def setup_logging(component: Optional[str] = None) -> None:
 
     # 2. Setup OpenTelemetry Logging SDK (Optional)
     otel_enabled = os.getenv("ENABLE_OTEL", "false").lower() == "true"
-    if otel_enabled:
+    if otel_enabled and OTEL_AVAILABLE:
         try:
             resource = Resource.create({
                 "service.name": service_name,

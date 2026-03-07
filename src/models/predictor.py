@@ -8,11 +8,18 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 import pandas as pd
 import structlog
-import shap
 
 from ..config import MODELS_DIR, MODEL_CONFIG
 
 logger = structlog.get_logger()
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    shap = None
+    SHAP_AVAILABLE = False
+    logger.warning("shap_not_available_predictor", message="SHAP is not installed; explain endpoint will be limited")
 
 # Feature flag for MLflow support
 MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
@@ -84,7 +91,7 @@ class ModelPredictor:
         self._load_from_file()
         
         # Initialize explainer if model is loaded
-        if self.model is not None:
+        if self.model is not None and SHAP_AVAILABLE:
             try:
                 self.explainer = shap.TreeExplainer(self.model)
                 logger.info("shap_explainer_initialized")
