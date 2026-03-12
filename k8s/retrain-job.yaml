@@ -7,7 +7,7 @@ metadata:
     app: passos-magicos
     component: training
   annotations:
-    mlops.passos-magicos/triggered-at: "2026-03-12T00:00:08.993396"
+    mlops.passos-magicos/triggered-at: "2026-03-12T06:00:12.594967"
 spec:
   ttlSecondsAfterFinished: 3600
   template:
